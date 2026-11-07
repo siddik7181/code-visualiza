@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Visualiza</title>
+    <link rel="icon" href="icons/icon16.png" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="vz-top">
+      <b class="vz-brand">Visualiza</b>
+      <span class="vz-tagline">Run Python step by step and watch the data change</span>
+      <select id="examples" class="vz-pick" aria-label="Examples"></select>
+      <button id="tab" class="vz-btn" title="Open in a tab (more room)" aria-label="Open in a tab">⤢</button>
+    </header>
+    <main id="app" class="vz"></main>
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>

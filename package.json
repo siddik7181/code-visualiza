@@ -1,0 +1,28 @@
+{
+  "name": "visualiza",
+  "private": true,
+  "type": "module",
+  "description": "Visualiza, a Chrome extension that replays Python code step by step. The extension is extension/; this file is the dev tooling: format, lint, typecheck, test.",
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test --test-reporter=spec test/*.test.mjs",
+    "test:e2e": "node --test --test-reporter=spec test/*.e2e.mjs",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/chrome": "^0.3.7",
+    "@types/node": "^26.6.6",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
+    "prettier": "^3.9.10",
+    "puppeteer-core": "^24.43.1",
+    "typescript": "^7.0.2"
+  }
+}

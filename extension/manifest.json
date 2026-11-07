@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Visualiza: Python Code Visualizer",
+  "short_name": "Visualiza",
+  "version": "0.1.0",
+  "description": "Select Python code on any page, right-click, and replay it step by step: arrays, dicts, trees, graphs, the call tree. Runs offline.",
+  "minimum_chrome_version": "116",
+  "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "scripting"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "action": {
+    "default_title": "Open Visualiza",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self'"
+  }
+}

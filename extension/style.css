@@ -1,0 +1,1231 @@
+/* Visualiza's panel. The colours, buttons and every .vz-* picture style come from cs-mastery's style.css (the extension this was taken
+   from); the layout (two columns in a tab, one in the side panel), the tabs, the call tree and the code tree are new (end of the file). */
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#f6f7fb, #0e1015);
+  --card: light-dark(#ffffff, #171a21);
+  --line: light-dark(#e4e7ee, #272c37);
+  --text: light-dark(#1c2030, #e8eaf0);
+  --dim: light-dark(#6b7280, #9097a6);
+  --acc: #6c7bff;
+  --easy: #22a45d;
+  --medium: #e0a100;
+  --hard: #e5484d;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+}
+body {
+  font:
+    13px/1.55 system-ui,
+    -apple-system,
+    sans-serif;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+button:hover:not(:disabled) {
+  border-color: var(--acc);
+}
+button:disabled {
+  opacity: 0.75;
+  cursor: default;
+}
+:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 1px;
+}
+[hidden] {
+  display: none !important;
+}
+.primary {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: #fff;
+  font-weight: 600;
+  padding: 9px 12px;
+}
+.primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+/* ---------------------------------------------------------------- visualizer (visualizer.js) */
+.vz {
+  --vz-dur: 320ms;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+}
+.vz-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.vz-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(340px, 5fr) 7fr;
+}
+.vz-btn {
+  min-width: 32px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text);
+}
+.vz-inrow {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.vz-input {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  font:
+    12px/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  padding: 8px 10px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: none;
+}
+.vz-input:focus {
+  border-color: var(--acc);
+}
+.vz-run {
+  width: auto;
+  max-height: 56px; /* stays a button next to a long multi-line input */
+  padding: 0 16px;
+}
+.vz-note,
+.vz-status {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.vz-status.err,
+.vz-error {
+  color: var(--hard);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.vz-status:empty,
+.vz-note:empty {
+  display: none;
+}
+.vz-code {
+  overflow: auto;
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px 0;
+  font:
+    12px/1.6 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  scroll-behavior: smooth;
+}
+.vz-line {
+  display: flex;
+  gap: 10px;
+  padding: 0 10px 0 0;
+  border-left: 3px solid transparent;
+  white-space: pre;
+  transition: background var(--vz-dur);
+}
+.vz-ln {
+  width: 28px;
+  flex: none;
+  text-align: right;
+  color: var(--dim);
+  opacity: 0.6;
+  user-select: none;
+}
+.vz-line.ran {
+  background: color-mix(in srgb, var(--easy) 12%, transparent);
+  border-left-color: color-mix(in srgb, var(--easy) 70%, transparent);
+}
+.vz-line.cur {
+  background: color-mix(in srgb, var(--acc) 20%, transparent);
+  border-left-color: var(--acc);
+}
+.vz-line.bad {
+  background: color-mix(in srgb, var(--hard) 22%, transparent);
+  border-left-color: var(--hard);
+}
+.vz-caption {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12.5px;
+  min-height: 20px;
+}
+.vz-step {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--acc);
+}
+.vz-what {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.vz-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vz-frame {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vz-frame.top {
+  border-color: color-mix(in srgb, var(--acc) 55%, var(--line));
+}
+.vz-frame.ret {
+  border-color: color-mix(in srgb, var(--easy) 60%, var(--line));
+}
+.vz-frame.collapsed {
+  padding: 5px 10px;
+  gap: 4px;
+  opacity: 0.75;
+}
+.vz-frame.collapsed .vz-structs {
+  display: none;
+}
+.vz-fhead {
+  font:
+    600 11.5px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: var(--dim);
+  white-space: pre;
+}
+.vz-scalars,
+.vz-set,
+.vz-objbody {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.vz-var,
+.vz-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 3px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font:
+    12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.vz-var b {
+  color: var(--acc);
+  font-weight: 600;
+}
+.vz-structs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.vz-sname {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 5px;
+  font:
+    12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.vz-sname b {
+  color: var(--acc);
+}
+.vz-sname span {
+  font-size: 10.5px;
+  color: var(--dim);
+}
+.vz-scroll {
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+/* arrays */
+.vz-arr {
+  position: relative;
+  display: inline-block;
+  min-width: 100%;
+}
+.vz-cells {
+  display: flex;
+  gap: 4px;
+}
+.vz-cell {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font:
+    600 13px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  transition:
+    transform var(--vz-dur) cubic-bezier(0.3, 0.7, 0.3, 1),
+    opacity var(--vz-dur),
+    background var(--vz-dur);
+}
+.vz-cell.out {
+  opacity: 0.32;
+}
+.vz-v.long,
+.vz-gc.long {
+  font-size: 10px;
+}
+.vz-v.xlong,
+.vz-gc.xlong {
+  font-size: 8.5px;
+  max-width: 32px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vz-i {
+  position: absolute;
+  top: -15px;
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--dim);
+}
+.vz-cells {
+  margin-top: 14px;
+}
+.vz-ptrs {
+  position: relative;
+  height: 20px;
+  margin-top: 4px;
+}
+.vz-ptr {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font:
+    600 10.5px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: var(--acc);
+  transition: transform var(--vz-dur) cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+.vz-ptr i {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 6px solid var(--acc);
+}
+.vz-ptr.past {
+  opacity: 0.55;
+}
+/* grids */
+.vz-grid {
+  display: inline-grid;
+  gap: 3px;
+  font:
+    12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.vz-gh {
+  font-size: 9.5px;
+  color: var(--dim);
+  display: grid;
+  place-items: center;
+}
+.vz-gc {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 3px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  transition: background var(--vz-dur);
+}
+.vz-gc.line {
+  background: color-mix(in srgb, var(--acc) 9%, var(--bg));
+}
+.vz-gc.cur {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 26%, var(--bg));
+}
+/* dicts */
+.vz-dict {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 140px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  font:
+    12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.vz-kv {
+  display: grid;
+  grid-template-columns: minmax(48px, auto) 1fr;
+  border-top: 1px solid var(--line);
+  transition: background var(--vz-dur);
+}
+.vz-kv:first-child {
+  border-top: 0;
+}
+.vz-k,
+.vz-val {
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.vz-k {
+  border-right: 1px solid var(--line);
+  color: var(--dim);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+.vz-kv.hot {
+  background: color-mix(in srgb, var(--acc) 18%, transparent);
+}
+.vz-kv.hot .vz-k {
+  color: var(--acc);
+  font-weight: 600;
+}
+.vz-empty {
+  padding: 4px 10px;
+  color: var(--dim);
+  font-size: 11px;
+}
+/* linked lists, trees, graphs */
+.vz-nodes {
+  position: relative;
+  min-height: 70px;
+}
+.vz-links {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+.vz-links marker path {
+  fill: var(--dim);
+}
+.vz-link {
+  fill: none;
+  stroke: var(--dim);
+  stroke-width: 1.6;
+}
+.vz-link.dash {
+  stroke-dasharray: 4 3;
+  opacity: 0.7;
+}
+.vz-node {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--line);
+  background: var(--bg);
+  font:
+    600 12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  transition:
+    transform var(--vz-dur) cubic-bezier(0.3, 0.7, 0.3, 1),
+    border-color var(--vz-dur),
+    background var(--vz-dur);
+}
+.vz-nv {
+  max-width: 34px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vz-node.hot {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 20%, var(--bg));
+}
+.vz-nl {
+  position: absolute;
+  top: -17px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--acc);
+}
+/* output */
+.vz-label {
+  font-size: 11px;
+  color: var(--dim);
+}
+.vz-print {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  max-height: 120px;
+  overflow: auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.vz-result {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--easy) 50%, var(--line));
+  background: color-mix(in srgb, var(--easy) 10%, var(--card));
+  font:
+    12.5px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  animation: vz-in var(--vz-dur) ease-out;
+}
+.vz-result span {
+  color: var(--dim);
+}
+/* controls */
+.vz-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+.vz-slider {
+  flex: 1;
+  min-width: 60px;
+  accent-color: var(--acc);
+}
+.vz-count {
+  font:
+    11px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: var(--dim);
+  min-width: 52px;
+  text-align: center;
+}
+/* change animations */
+.chg {
+  animation: vz-flash calc(var(--vz-dur) * 2.4) ease-out;
+}
+.chg-box {
+  animation: vz-box calc(var(--vz-dur) * 2.4) ease-out;
+}
+.enter {
+  animation: vz-in var(--vz-dur) ease-out;
+}
+@keyframes vz-flash {
+  0% {
+    background: color-mix(in srgb, var(--medium) 55%, var(--bg));
+    border-color: var(--medium);
+  }
+}
+@keyframes vz-box {
+  0% {
+    box-shadow: 0 0 0 2px var(--medium);
+  }
+}
+@keyframes vz-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vz * {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+.vz-ptr.probe {
+  color: var(--medium);
+}
+.vz-ptr.probe i {
+  border-bottom-color: var(--medium);
+}
+.vz-chip.hot {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 18%, var(--bg));
+}
+.vz-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vz-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 2px 6px 2px 0;
+  border-radius: 7px;
+  transition: background var(--vz-dur);
+}
+.vz-row.hot {
+  background: color-mix(in srgb, var(--acc) 14%, transparent);
+}
+.vz-ri {
+  width: 22px;
+  flex: none;
+  text-align: right;
+  font:
+    10.5px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: var(--dim);
+}
+.vz-rv {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.vz-rv .vz-chip {
+  padding: 1px 7px;
+}
+.vz-graph .vz-node {
+  width: 34px;
+  height: 34px;
+}
+.vz-node.path {
+  border-color: color-mix(in srgb, var(--acc) 55%, var(--line));
+  border-style: dashed;
+}
+.vz-left > *,
+.vz-right > * {
+  flex-shrink: 0;
+}
+.vz-cells:empty::after {
+  content: "empty";
+  padding: 8px 2px;
+  font-size: 11px;
+  color: var(--dim);
+}
+/* bars (number lists sorted in place) */
+.vz-bar {
+  display: none;
+}
+.vz-arr.bars .vz-cell {
+  height: 104px;
+  align-items: end;
+  border-color: transparent;
+  background: none;
+}
+.vz-arr.bars .vz-bar {
+  display: block;
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 20px;
+  height: calc(var(--h, 0.1) * 76px);
+  border-radius: 5px 5px 2px 2px;
+  background: color-mix(in srgb, var(--acc) 70%, var(--card));
+  transition:
+    height var(--vz-dur) cubic-bezier(0.3, 0.7, 0.3, 1),
+    background var(--vz-dur);
+}
+.vz-arr.bars .vz-cell.neg .vz-bar {
+  background: color-mix(in srgb, var(--hard) 65%, var(--card));
+}
+.vz-arr.bars .vz-cell.out .vz-bar {
+  background: var(--line);
+}
+.vz-arr.bars .vz-cell.chg .vz-bar {
+  animation: vz-bar calc(var(--vz-dur) * 2.4) ease-out; /* (a flash: .chg stays on the cell after it) */
+}
+@keyframes vz-bar {
+  0% {
+    background: var(--medium);
+  }
+}
+.vz-arr.bars .vz-cell.chg {
+  animation: none;
+}
+.vz-arr.bars .vz-v {
+  font-size: 11px;
+}
+.vz-toggle {
+  margin-left: auto;
+  padding: 1px 8px;
+  height: auto;
+  border-radius: 6px;
+  font:
+    10.5px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: var(--dim);
+}
+.vz-ptr.meta {
+  color: var(--dim);
+  font-weight: 400;
+}
+.vz-ptr.meta i {
+  border-bottom-color: var(--dim);
+}
+/* heaps */
+.vz-heap {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vz-heap .vz-node {
+  width: 34px;
+  height: 34px;
+  font-size: 11px;
+}
+/* stacks */
+.vz-stack {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 90px;
+  padding: 4px;
+  gap: 3px;
+  border: 1.5px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 9px 9px;
+}
+.vz-stack.empty::after {
+  content: "empty";
+  padding: 6px;
+  font-size: 11px;
+  color: var(--dim);
+  text-align: center;
+}
+.vz-sitem {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding: 5px 26px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font:
+    600 12.5px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  white-space: nowrap;
+  transition: background var(--vz-dur);
+}
+.vz-sitem.top {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 16%, var(--bg));
+}
+.vz-sitem.top::before {
+  content: "top";
+  position: absolute;
+  left: calc(100% + 8px);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--acc);
+}
+.vz-si {
+  position: absolute;
+  left: 6px;
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--dim);
+}
+.leave {
+  animation: vz-out calc(var(--vz-dur) * 0.8) ease-in forwards;
+}
+@keyframes vz-out {
+  to {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.9);
+  }
+}
+/* intervals */
+.vz-ivl {
+  position: relative;
+  margin-top: 4px;
+}
+.vz-axis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 18px;
+  border-top: 1px solid var(--line);
+}
+.vz-tick {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+  font:
+    9.5px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: var(--dim);
+}
+.vz-ival {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 20px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--acc) 50%, var(--line));
+  background: color-mix(in srgb, var(--acc) 22%, var(--bg));
+  font:
+    10.5px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  transition:
+    transform var(--vz-dur) cubic-bezier(0.3, 0.7, 0.3, 1),
+    width var(--vz-dur) cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+.vz-ival.hot {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 42%, var(--bg));
+}
+/* bits */
+.vz-bits {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  margin-top: 12px;
+}
+.vz-sign {
+  font:
+    600 13px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  margin-right: 2px;
+}
+.vz-bit {
+  position: relative;
+  width: 24px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font:
+    600 12px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  color: var(--dim);
+  transition: background var(--vz-dur);
+}
+.vz-bit.one {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--acc) 55%, var(--line));
+  background: color-mix(in srgb, var(--acc) 22%, var(--bg));
+}
+.vz-bit .vz-i {
+  top: -13px;
+}
+
+/* ---------------------------------------------------------------- the panel (new) */
+.vz-brand {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.vz-tagline {
+  flex: 1;
+  min-width: 0;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vz-pick {
+  max-width: 46vw;
+  padding: 6px 8px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.vz-left,
+.vz-right {
+  min-width: 0;
+  overflow: auto;
+  padding: 12px 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.vz-left {
+  border-right: 1px solid var(--line);
+}
+.vz-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.vz-edit {
+  margin-left: auto;
+  height: 26px;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* the code fills the column: the editor while editing, the traced lines while playing */
+.vz-left > .vz-code,
+.vz-left > .vz-editor {
+  flex: 1 1 0;
+  min-height: 200px;
+}
+.vz-editor {
+  resize: none;
+  padding: 6px 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  outline: none;
+  font: 12px/1.6 var(--mono);
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+}
+.vz-editor:focus {
+  border-color: var(--acc);
+}
+.vz-line {
+  cursor: pointer;
+}
+.vz-line:hover:not(.cur):not(.ran) {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.vz-hits {
+  width: 24px;
+  flex: none;
+  margin-left: -6px;
+  text-align: right;
+  font-size: 9.5px;
+  color: var(--dim);
+  user-select: none;
+}
+.vz-caption {
+  position: sticky;
+  top: -12px;
+  z-index: 2;
+  margin: -12px 0 0;
+  padding: 12px 0 4px;
+  background: var(--bg);
+}
+.vz-tabs {
+  display: flex;
+  gap: 2px;
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--card);
+}
+.vz-tab {
+  border: 0;
+  background: none;
+  padding: 4px 12px;
+  border-radius: 7px;
+  color: var(--dim);
+}
+.vz-tab[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--acc) 18%, var(--card));
+  color: var(--text);
+  font-weight: 600;
+}
+.vz-pane {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  scroll-behavior: smooth;
+}
+/* call tree */
+.vz-ctree {
+  position: relative;
+  margin: 0 auto; /* a tree narrower than the pane is centred */
+}
+.vz-cnode {
+  position: absolute;
+  height: 38px;
+  padding: 2px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border-radius: 9px;
+  border: 1.5px solid var(--line);
+  background: var(--bg);
+  font: 11.5px/1.2 var(--mono);
+  transition:
+    opacity var(--vz-dur),
+    visibility var(--vz-dur),
+    border-color var(--vz-dur),
+    background var(--vz-dur);
+}
+.vz-cl,
+.vz-cr {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vz-cr {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--easy);
+}
+.vz-cr:empty {
+  display: none;
+}
+.vz-cnode.off {
+  visibility: hidden;
+  opacity: 0;
+}
+.vz-cnode.done:not(.live) {
+  opacity: 0.78;
+}
+.vz-cnode.live {
+  border-color: color-mix(in srgb, var(--acc) 60%, var(--line));
+  background: color-mix(in srgb, var(--acc) 8%, var(--bg));
+}
+.vz-cnode.cur {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 24%, var(--bg));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 22%, transparent);
+}
+.vz-cnode.bad {
+  border-color: var(--hard);
+}
+.vz-cnode.bad .vz-cr {
+  color: var(--hard);
+}
+.vz-ctree .vz-link {
+  transition: opacity var(--vz-dur);
+}
+.vz-ctree .vz-link.off {
+  opacity: 0;
+}
+.vz-ctree .vz-link.live {
+  stroke: var(--acc);
+  stroke-width: 2.2;
+}
+/* code tree */
+.vz-otree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 20px;
+  position: relative;
+}
+.vz-otree > ul {
+  padding-left: 0;
+}
+.vz-otree li {
+  position: relative;
+}
+.vz-otree ul ul::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 0;
+  bottom: 13px;
+  border-left: 1px solid var(--line);
+}
+.vz-otree ul ul > li::before {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: 14px;
+  width: 9px;
+  border-top: 1px solid var(--line);
+}
+.vz-onode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 1px 0;
+  padding: 3px 8px;
+  text-align: left;
+  border: 1px solid transparent;
+  background: none;
+  border-radius: 7px;
+  font: 12px var(--mono);
+  transition:
+    background var(--vz-dur),
+    border-color var(--vz-dur);
+}
+.vz-onode:hover:not(:disabled) {
+  border-color: var(--line);
+}
+.vz-ok {
+  flex: none;
+  min-width: 50px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--dim);
+  background: color-mix(in srgb, var(--dim) 14%, transparent);
+}
+.vz-ok.k-def,
+.vz-ok.k-class {
+  color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 15%, transparent);
+}
+.vz-ok:is(.k-for, .k-while, .k-if, .k-elif, .k-else, .k-try, .k-except, .k-finally, .k-with, .k-match, .k-case) {
+  color: color-mix(in srgb, var(--medium) 75%, var(--text));
+  background: color-mix(in srgb, var(--medium) 16%, transparent);
+}
+.vz-ok:is(.k-return, .k-break, .k-continue) {
+  color: color-mix(in srgb, var(--easy) 80%, var(--text));
+  background: color-mix(in srgb, var(--easy) 15%, transparent);
+}
+.vz-ok.k-raise {
+  color: var(--hard);
+  background: color-mix(in srgb, var(--hard) 14%, transparent);
+}
+.vz-os {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vz-oc {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+.vz-onode.on {
+  background: color-mix(in srgb, var(--acc) 8%, transparent);
+}
+.vz-onode.cur {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 22%, transparent);
+}
+/* narrow screens: one column, the page scrolls */
+@media (max-width: 860px) {
+  .vz-tagline {
+    display: none;
+  }
+  .vz-body {
+    display: block;
+    overflow: auto;
+  }
+  .vz-left,
+  .vz-right {
+    overflow: visible;
+  }
+  .vz-left {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .vz-left > .vz-code,
+  .vz-left > .vz-editor {
+    flex: none;
+    height: 40vh;
+  }
+  .vz-left > .vz-code {
+    height: auto; /* short code leaves the room to the pictures (a side panel is narrow) */
+    max-height: 40vh;
+    min-height: 0;
+  }
+  .vz-caption {
+    position: static;
+    margin: 0;
+    padding: 0;
+  }
+  .vz-pane {
+    flex: none;
+    height: 60vh;
+  }
+}
