@@ -167,6 +167,35 @@ describe("the extension in Chrome", { skip: !existsSync(CHROME) && `no Chrome at
     await page.close();
   });
 
+  test("JavaScript sent from the menu is run as JavaScript, with a call suggested", async () => {
+    const page = await openPanel();
+    const code = "  function twice(nums) {\n    const out = [];\n    for (const x of nums) out.push(x * 2);\n    return out;\n  }";
+    await page.evaluate((code) => chrome.storage.session.set({ pending: { code, at: Date.now() } }), code);
+    await page.waitForFunction(() =>
+      /** @type {HTMLTextAreaElement} */ (document.querySelector(".vz-editor")).value.startsWith("function twice"),
+    );
+    await idle(page);
+    assert.equal(await page.$eval("select.vz-lang", (e) => e.value), "javascript");
+    await press(page, "End");
+    const v = await view(page);
+    assert.deepEqual([v.input, v.status], ["twice([5, 2, 8, 1, 9, 3])", ""]);
+    assert.match(v.out, /Result \[10, 4, 16, 2, 18, 6\]/);
+    await page.close();
+  });
+
+  test("a JavaScript example is shown the JavaScript way: its language, a Map, null", async () => {
+    const page = await openPanel();
+    await page.select("#examples", String(EXAMPLES.findIndex((e) => e.title === "Two Sum (Map)")));
+    await idle(page);
+    assert.equal(await page.$eval("select.vz-lang", (e) => e.value), "javascript");
+    await press(page, "ArrowRight", 8);
+    assert.match(await page.$eval(".vz-structs", (e) => e.textContent), /seen\s*Map · \d/);
+    await runCode(page, "function f() {\n  let x = null;\n  return x;\n}", "f()");
+    await press(page, "End");
+    assert.match((await view(page)).out, /Result null/);
+    await page.close();
+  });
+
   test("⤢ opens a tab with the same code and input", async () => {
     const page = await openPanel();
     await runCode(page, "def sq(x):\n    return x * x", "sq(7)");

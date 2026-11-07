@@ -17,7 +17,7 @@ const { pending } = await chrome.storage.session.get("pending");
 // (a tab opened with ⤢ gets the code in its address: the panel listens to storage.session, so a handoff there would be taken by the panel)
 const handoff = location.hash.length > 1 ? JSON.parse(decodeURIComponent(location.hash.slice(1))) : null;
 history.replaceState(null, "", location.pathname);
-if (!receive(pending)) take(handoff && handoff.code, handoff && handoff.input);
+if (!receive(pending)) take(handoff && handoff.code, handoff && handoff.input, handoff && handoff.lang);
 
 // the same page in a tab, with the code and input as they are now
 document.getElementById("tab").onclick = () => chrome.tabs.create({ url: `panel.html#${encodeURIComponent(JSON.stringify(now()))}` });

@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { describe, test } from "node:test";
 import { EXAMPLES } from "../extension/examples.js";
+import { run as runJs } from "../extension/tracer.js";
 import { ext, trace } from "./python.mjs";
 
 const manifest = JSON.parse(await readFile(ext("manifest.json"), "utf8"));
@@ -18,6 +19,11 @@ describe("the manifest", () => {
       ...Object.values(manifest.action.default_icon),
     ];
     for (const f of named) assert.ok(existsSync(ext(f)), `manifest.json names ${f}, which doesn't exist`);
+  });
+
+  test("fits the Chrome Web Store's limits (name up to 75 characters, description up to 132)", () => {
+    assert.ok(manifest.name.length <= 75, `name: ${manifest.name.length}`);
+    assert.ok(manifest.description.length <= 132, `description: ${manifest.description.length}`);
   });
 
   test("keeps eval off and Python off the network", () => {
@@ -50,8 +56,8 @@ describe("the files", () => {
 
 describe("the examples", () => {
   for (const ex of EXAMPLES) {
-    test(ex.title, () => {
-      const r = trace(ex.code, ex.input);
+    test(`${ex.lang}: ${ex.title}`, () => {
+      const r = ex.lang === "javascript" ? runJs(ex.code, ex.input) : trace(ex.code, ex.input);
       assert.equal(r.error, null);
       assert.ok(r.steps.length > 1, `only ${r.steps.length} step`);
       assert.equal(r.truncated, false);

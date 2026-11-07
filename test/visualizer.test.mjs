@@ -1,7 +1,10 @@
-// The panel's logic that doesn't need a page: the call tree built from a trace, and the clean-up of code selected on a page.
+// The panel's logic that doesn't need a page: the call tree built from a trace, the clean-up of code selected on a page, and telling
+// Python from JavaScript.
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
-import { callTree, clean } from "../extension/visualizer.js";
+import { after, describe, test } from "node:test";
+import { EXAMPLES } from "../extension/examples.js";
+import { run as runJs } from "../extension/tracer.js";
+import { callTree, clean, detectLanguage, setLanguage } from "../extension/visualizer.js";
 import { trace } from "./python.mjs";
 
 const all = (n) => [n, ...n.children.flatMap(all)];
@@ -79,4 +82,34 @@ describe("clean(): code selected on a page", () => {
   test("gives code Python runs", () => {
     assert.equal(trace(clean("\u00a0\u00a0\u00a0\u00a0def f(n):\n        return n * 2"), "f(3)").result.v, 6);
   });
+});
+
+describe("the call tree of a JavaScript run", () => {
+  after(() => setLanguage("python"));
+
+  test("labels calls with their arguments, written the JavaScript way (null, true), without this", () => {
+    setLanguage("javascript");
+    const t = callTree(runJs("class C {\n  m(x, y) {\n    return x === null && y;\n  }\n}", "new C().m(null, true)").steps);
+    assert.deepEqual([t.children[0].label, t.children[0].value], ["m(null, true)", "true"]);
+  });
+
+  test("has every call of a recursion, and what each returned", () => {
+    setLanguage("javascript");
+    const t = callTree(runJs("function fib(n) {\n  return n < 2 ? n : fib(n - 1) + fib(n - 2);\n}", "fib(4)").steps);
+    assert.equal(all(t).length - 1, 9);
+    assert.deepEqual([t.children[0].label, t.children[0].value], ["fib(4)", "3"]);
+  });
+});
+
+describe("detectLanguage(): Python or JavaScript, for code selected on a page", () => {
+  for (const ex of EXAMPLES) test(`${ex.lang} example: ${ex.title}`, () => assert.equal(detectLanguage(ex.code), ex.lang));
+
+  test("short snippets", () => {
+    assert.equal(detectLanguage("def f(x):\n    return x * 2"), "python");
+    assert.equal(detectLanguage("for i in range(3):\n    print(i)"), "python");
+    assert.equal(detectLanguage("const f = (x) => x * 2;"), "javascript");
+    assert.equal(detectLanguage("for (let i = 0; i < 3; i++) {\n  console.log(i);\n}"), "javascript");
+  });
+
+  test("a tie (nothing tells) is Python", () => assert.equal(detectLanguage("x = 1"), "python"));
 });

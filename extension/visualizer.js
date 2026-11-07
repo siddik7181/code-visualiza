@@ -73,12 +73,45 @@ const svgEl = (tag) => document.createElementNS("http://www.w3.org/2000/svg", ta
 const fnName = (fn) => (fn === "<module>" ? "global" : fn);
 
 // ---------------------------------------------------------------- values
+// How values and operations are written: Python's way or JavaScript's. Module-wide, set from each trace (the panel shows one at a time).
+const SYNTAX = {
+  python: {
+    js: false,
+    none: "None",
+    yes: "True",
+    no: "False",
+    push: "append",
+    unshift: "appendleft",
+    shift: "popleft",
+    drop: "remove",
+    del: "del",
+    names: {},
+  },
+  javascript: {
+    js: true,
+    none: "null",
+    yes: "true",
+    no: "false",
+    push: "push",
+    unshift: "unshift",
+    shift: "shift",
+    drop: "delete",
+    del: "delete",
+    names: { list: "Array", dict: "Object", set: "Set" },
+  },
+};
+let SYN = SYNTAX.python;
+/** @param {string} lang "python" or "javascript" */
+export const setLanguage = (lang) => (SYN = SYNTAX[lang] || SYNTAX.python);
 const isRef = (v) => v != null && typeof v === "object" && "r" in v;
 const objOf = (v, heap) => (isRef(v) ? heap[v.r] : null);
+// A key of a dict, as shown and as compared with a variable. A JavaScript object's keys are strings (seen[2] is seen["2"]): shown bare,
+// so the key 2 and a variable holding 2 match.
+const keyOf = (k, o, heap) => (SYN.js && o && o.t === "dict" && !o.cls && k !== null && typeof k !== "object" ? String(k) : fmt(k, heap));
 function fmt(v, heap, depth = 0) {
-  if (v === null || v === undefined) return "None";
-  if (v === true) return "True";
-  if (v === false) return "False";
+  if (v === null || v === undefined) return SYN.none;
+  if (v === true) return SYN.yes;
+  if (v === false) return SYN.no;
   if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(+v.toFixed(4));
   if (typeof v === "string") return `'${v}'`;
   if ("x" in v) return v.x;
@@ -98,12 +131,15 @@ function fmt(v, heap, depth = 0) {
     case "deque":
       return `deque([${items(o.v, o.n)}])`;
     case "set":
-      return o.n ? `{${items(o.v, o.n)}}` : "set()";
-    case "dict":
-      return `{${o.kv
+      return SYN.js ? `Set {${items(o.v, o.n)}}` : o.n ? `{${items(o.v, o.n)}}` : "set()";
+    case "dict": {
+      const map = SYN.js && o.cls === "Map";
+      const body = o.kv
         .slice(0, 6)
-        .map(([k, x]) => `${fmt(k, heap, depth + 1)}: ${fmt(x, heap, depth + 1)}`)
-        .join(", ")}${o.n > 6 ? ", …" : ""}}`;
+        .map(([k, x]) => `${depth ? fmt(k, heap, depth + 1) : keyOf(k, o, heap)}${map ? " => " : ": "}${fmt(x, heap, depth + 1)}`)
+        .join(", ");
+      return `${map ? "Map " : ""}{${body}${o.n > 6 ? ", …" : ""}}`;
+    }
     case "obj":
       return nodeLabel(o, heap) !== null ? `${o.cls}(${nodeLabel(o, heap)})` : o.cls;
     default:
@@ -144,12 +180,12 @@ const GRAPH_NAME = /^(adj|adjacency|graph|g|neighbors|nbrs|children|tree|edges_o
 function adjacency(o, heap, name) {
   if (o.t === "dict") {
     if (!GRAPH_NAME.test(name) || !o.kv.length) return null;
-    const keys = o.kv.map(([k]) => fmt(k, heap));
+    const keys = o.kv.map(([k]) => keyOf(k, o, heap));
     const edges = [];
     for (const [k, x] of o.kv) {
       const l = objOf(x, heap);
       if (!l || !["list", "set", "tuple"].includes(l.t) || !l.v.every(primitive)) return null;
-      for (const y of l.v) edges.push([fmt(k, heap), fmt(y, heap)]);
+      for (const y of l.v) edges.push([keyOf(k, o, heap), fmt(y, heap)]);
     }
     const all = [...new Set([...keys, ...edges.map((e) => e[1])])];
     return all.length <= 24 ? { nodes: all, edges } : null;
@@ -200,12 +236,12 @@ function kindOf(v, heap, ptrs, name = "") {
   return "scalar";
 }
 
-// The variables of a frame, with `self` opened up into self.<attribute> (so a design class shows its own lists and maps).
+// The variables of a frame, with `self` (`this`) opened up into self.<attribute> (so a design class shows its own lists and maps).
 function variables(frame, heap) {
   const out = [];
   for (const [name, v] of frame.loc) {
     const o = objOf(v, heap);
-    if (name === "self" && o && o.t === "obj" && !isNode(o)) {
+    if ((name === "self" || name === "this") && o && o.t === "obj" && !isNode(o)) {
       for (const [k, x] of o.a) out.push([`self.${k}`, x]);
     } else out.push([name, v]);
   }
@@ -265,10 +301,10 @@ function containerDiff(name, a, b, ha, hb) {
   if ((a.t === "list" || a.t === "deque" || a.t === "tuple") && a.t === b.t) {
     const A = a.v.map((x) => f(x, ha)),
       B = b.v.map((x) => f(x, hb));
-    if (B.length === A.length + 1 && A.every((x, i) => x === B[i])) return [`${name}.append(${B[B.length - 1]})`];
-    if (B.length === A.length + 1 && A.every((x, i) => x === B[i + 1])) return [`${name}.appendleft(${B[0]})`];
+    if (B.length === A.length + 1 && A.every((x, i) => x === B[i])) return [`${name}.${SYN.push}(${B[B.length - 1]})`];
+    if (B.length === A.length + 1 && A.every((x, i) => x === B[i + 1])) return [`${name}.${SYN.unshift}(${B[0]})`];
     if (B.length === A.length - 1 && B.every((x, i) => x === A[i])) return [`${name}.pop() → ${A[A.length - 1]}`];
-    if (B.length === A.length - 1 && B.every((x, i) => x === A[i + 1])) return [`${name}.popleft() → ${A[0]}`];
+    if (B.length === A.length - 1 && B.every((x, i) => x === A[i + 1])) return [`${name}.${SYN.shift}() → ${A[0]}`];
     if (A.length === B.length) {
       const ch = A.map((x, i) => (x !== B[i] ? i : -1)).filter((i) => i >= 0);
       if (ch.length === 2 && A[ch[0]] === B[ch[1]] && A[ch[1]] === B[ch[0]]) return [`swap ${name}[${ch[0]}] ↔ ${name}[${ch[1]}]`];
@@ -287,14 +323,14 @@ function containerDiff(name, a, b, ha, hb) {
     return [`${name} now has ${B.length} items`];
   }
   if (a.t === "dict" && b.t === "dict") {
-    const A = new Map(a.kv.map(([k, x]) => [f(k, ha), f(x, ha)])),
-      B = new Map(b.kv.map(([k, x]) => [f(k, hb), f(x, hb)]));
+    const A = new Map(a.kv.map(([k, x]) => [keyOf(k, a, ha), f(x, ha)])),
+      B = new Map(b.kv.map(([k, x]) => [keyOf(k, b, hb), f(x, hb)]));
     const out = [];
     for (const [k, x] of B) {
       if (!A.has(k)) out.push(`${name}[${k}] = ${x} (new key)`);
       else if (A.get(k) !== x) out.push(`${name}[${k}]: ${A.get(k)} → ${x}`);
     }
-    for (const k of A.keys()) if (!B.has(k)) out.push(`del ${name}[${k}]`);
+    for (const k of A.keys()) if (!B.has(k)) out.push(`${SYN.del} ${name}[${k}]`);
     return out.slice(0, 3);
   }
   if (a.t === "set" && b.t === "set") {
@@ -302,7 +338,7 @@ function containerDiff(name, a, b, ha, hb) {
       B = new Set(b.v.map((x) => f(x, hb)));
     return [
       ...[...B].filter((x) => !A.has(x)).map((x) => `${name}.add(${x})`),
-      ...[...A].filter((x) => !B.has(x)).map((x) => `${name}.remove(${x})`),
+      ...[...A].filter((x) => !B.has(x)).map((x) => `${name}.${SYN.drop}(${x})`),
     ].slice(0, 3);
   }
   if (a.t === "obj" && b.t === "obj") {
@@ -320,8 +356,8 @@ const indent = (line) => (line.match(/^\s*/) || [""])[0].length;
 function branch(code, ranLine, nextLine) {
   const ran = code[ranLine - 1] || "",
     next = code[nextLine - 1] || "";
-  const m = /^\s*(if|elif|while|for)\b/.exec(ran);
-  if (!m || !nextLine) return "";
+  const m = /^\s*(?:}\s*else\s+)?(if|elif|while|for)\b/.exec(ran);
+  if (!m || !nextLine || nextLine === ranLine) return ""; // (`if (x) return y`: the next step is on the same line)
   const inside = indent(next) > indent(ran) && nextLine > ranLine;
   if (m[1] === "for") return inside ? "next item, go into the loop" : "no items left, the loop ends";
   if (m[1] === "while") return inside ? "condition true, loop again" : "condition false, the loop ends";
@@ -1106,7 +1142,11 @@ class CodeTreeView {
       const ul = el("ul");
       for (const n of nodes) {
         const b = el("button", "vz-onode");
-        b.append(el("span", `vz-ok k-${n.t}`, n.t), el("span", "vz-os", (code[n.l - 1] || "").trim()), el("span", "vz-oc"));
+        b.append(
+          el("span", `vz-ok k-${n.t.replace(/ /g, "-")}`, n.t),
+          el("span", "vz-os", (code[n.l - 1] || "").trim()),
+          el("span", "vz-oc"),
+        );
         b.title = `Line ${n.l}: go to the next time it runs`;
         b.onclick = () => this.onPick(n.l);
         const li = el("li");
@@ -1145,12 +1185,36 @@ export function clean(code) {
   return lines.map((l) => l.slice(pad)).join("\n");
 }
 
-/** The whole app, in `host`; `picker` is the examples <select>. Returns { take(code, input) }: run code from elsewhere (null: the first
- * example), and { now() }: the code and input as they are.
+/** Python or JavaScript, from how the code looks (code selected on a page doesn't say which). Ties go to Python. */
+export function detectLanguage(code) {
+  const count = (tests) => tests.filter((re) => re.test(code)).length;
+  const py = count([
+    /^\s*(async\s+)?def \w+\s*\(.*\)\s*(->[^:]*)?:\s*(#.*)?$/m,
+    /^\s*(if|elif|else|for|while|try|except|finally|with|class)\b[^{;]*:\s*(#.*)?$/m,
+    /\b(None|True|False|elif|self|lambda|nonlocal)\b/,
+    /^\s*#/m,
+    /^\s*from\s+[\w.]+\s+import\b/m,
+    /\b(and|or|not) /,
+  ]);
+  const js = count([
+    /\b(function|const|let|var|undefined|null)\b/,
+    /=>/,
+    /[;{}]\s*$/m,
+    /===|!==|&&|\|\|/,
+    /^\s*\/\//m,
+    /\bthis\./,
+    /\bconsole\.\w+\(/,
+  ]);
+  return js > py ? "javascript" : "python";
+}
+
+/** The whole app, in `host`; `picker` is the examples <select>. Returns { take(code, input, lang) }: run code from elsewhere (null: the
+ * first example; the language is detected when not given), and { now() }: the code, input and language as they are.
  * @param {HTMLElement} host @param {HTMLSelectElement} picker @param {{ group: string, title: string, code: string, input: string }[]} examples */
 export function mountApp(host, picker, examples) {
   let code = []; // the lines of the code that was traced
   let tracedCode = null,
+    tracedLang = null,
     suggested = null; // the input that was filled in for the user (replaced when the code changes)
   let result = null; // the trace
   let i = 0,
@@ -1169,7 +1233,13 @@ export function mountApp(host, picker, examples) {
       document.execCommand("insertText", false, "    "); // (keeps undo working; Esc then Tab leaves the editor)
     } else if (e.key === "Escape") e.target.blur();
   };
-  const editor = h("textarea.vz-editor", { spellcheck: false, ariaLabel: "Python code", onkeydown: editKeys });
+  const editor = h("textarea.vz-editor", { spellcheck: false, ariaLabel: "Code", onkeydown: editKeys });
+  const langPick = h(
+    "select.vz-lang",
+    { ariaLabel: "Language" },
+    h("option", { value: "python", textContent: "Python" }),
+    h("option", { value: "javascript", textContent: "JavaScript" }),
+  );
   editor.setAttribute("autocapitalize", "off");
   const input = h("textarea.vz-input", {
     spellcheck: false,
@@ -1228,7 +1298,7 @@ export function mountApp(host, picker, examples) {
       h(
         "section.vz-left",
         { ariaLabel: "Code and input" },
-        h("div.vz-head", {}, h("b", { textContent: "Python" }), editBtn),
+        h("div.vz-head", {}, langPick, editBtn),
         editor,
         codeBox,
         h("div.vz-head", {}, h("b", { textContent: "Input" })),
@@ -1302,6 +1372,7 @@ export function mountApp(host, picker, examples) {
   function load(ex) {
     editor.value = ex.code;
     input.value = ex.input;
+    langPick.value = ex.lang;
     suggested = null;
     picker.value = String(examples.indexOf(ex));
     run();
@@ -1438,11 +1509,11 @@ export function mountApp(host, picker, examples) {
       const val = evaluate(p.e, ints);
       if (val === null) continue;
       const o = objOf(byName.get(p.on), s.heap);
-      const key = fmt(val, s.heap);
+      const key = keyOf(val, o, s.heap);
       const shown = p.text.replace(/\s+/g, " ");
       const math = shown === key ? key : `${shown} = ${key}`;
       if (p.kind === "in" && o) {
-        const keys = o.t === "dict" ? o.kv.map(([k]) => fmt(k, s.heap)) : (o.v || []).map((x) => fmt(x, s.heap));
+        const keys = o.t === "dict" ? o.kv.map(([k]) => keyOf(k, o, s.heap)) : (o.v || []).map((x) => fmt(x, s.heap));
         out.push({ on: p.on, key, idx: val, text: `next: is ${math} in ${p.on}? ${keys.includes(key) ? "yes" : "no"}` });
       } else out.push({ on: p.on, key, idx: val, label: shown, text: `next: reads ${p.on}[${math}]` });
     }
@@ -1563,7 +1634,12 @@ export function mountApp(host, picker, examples) {
       if (fe.structs.children[order] !== item.wrap) fe.structs.insertBefore(item.wrap, fe.structs.children[order] || null);
       order++;
       const o = objOf(v, heap);
-      const typeText = typeof v === "string" ? `str · ${v.length}` : o ? `${o.cls || o.t}${o.n !== undefined ? ` · ${o.n}` : ""}` : "";
+      const typeText =
+        typeof v === "string"
+          ? `${SYN.js ? "string" : "str"} · ${v.length}`
+          : o
+            ? `${o.cls || SYN.names[o.t] || o.t}${o.n !== undefined ? ` · ${o.n}` : ""}`
+            : "";
       const changedRef = prevFrame && (prevFrame.loc.find(([k]) => k === name) || [])[1];
       const reassigned = animate && changedRef !== undefined && isRef(changedRef) && isRef(v) && changedRef.r !== v.r;
       if (reassigned) flash(item.wrap, "chg-box");
@@ -1608,10 +1684,10 @@ export function mountApp(host, picker, examples) {
         }
         item.view.update(rows, cur, animate);
       } else if (kind === "dict") {
-        const keyVars = (ptrInfo.keys[name] || []).filter((k) => valuesByName.has(k)).map((k) => fmt(valuesByName.get(k), heap));
+        const keyVars = (ptrInfo.keys[name] || []).filter((k) => valuesByName.has(k)).map((k) => keyOf(valuesByName.get(k), o, heap));
         keyVars.push(...looks.filter((l) => l.on === name).map((l) => l.key));
         item.view.update(
-          o.kv.map(([k, x]) => [fmt(k, heap), fmt(x, heap)]),
+          o.kv.map(([k, x]) => [keyOf(k, o, heap), fmt(x, heap)]),
           new Set(keyVars),
           animate,
         );
@@ -1621,7 +1697,7 @@ export function mountApp(host, picker, examples) {
         for (const p of ptrs) labels.set(String(p.idx), [...(labels.get(String(p.idx)) || []), p.name]);
         for (const k of ptrInfo.keys[name] || [])
           if (valuesByName.has(k)) {
-            const key = fmt(valuesByName.get(k), heap);
+            const key = keyOf(valuesByName.get(k), o, heap);
             if (!labels.get(key)?.includes(k)) labels.set(key, [...(labels.get(key) || []), k]);
           }
         item.view.update(g, labels, animate);
@@ -1724,18 +1800,21 @@ export function mountApp(host, picker, examples) {
   async function run() {
     stop();
     const my = ++runs;
-    const src = editor.value;
+    const src = editor.value,
+      lang = langPick.value;
     // an input that was filled in for other code gets suggested again for this code
-    const driver = input.value === suggested && src !== tracedCode ? "" : input.value;
+    const driver = input.value === suggested && (src !== tracedCode || lang !== tracedLang) ? "" : input.value;
     runBtn.disabled = true;
     note.textContent = "";
     status.className = "vz-status";
-    status.textContent = box && box.warm ? "Running…" : "Starting Python…";
+    status.textContent = (box && box.warm) || lang === "javascript" ? "Running…" : "Starting Python…";
     try {
-      const r = await ask({ mode: "trace", code: src, driver, text: "" });
+      const r = await ask({ mode: "trace", lang, code: src, driver, text: "" });
       if (my !== runs) return; // a newer run started meanwhile
       result = r;
+      setLanguage(r.lang || "python");
       tracedCode = src;
+      tracedLang = lang;
       status.textContent = "";
       if (!driver.trim() && r.driver) input.value = suggested = r.driver;
       input.rows = Math.min(8, Math.max(2, input.value.split("\n").length));
@@ -1790,14 +1869,15 @@ export function mountApp(host, picker, examples) {
   editor.addEventListener("input", () => (picker.value = "")); // edited: no longer the example
   show("data");
   return {
-    take(src, driver = "") {
+    take(src, driver = "", lang = src == null ? "python" : detectLanguage(src)) {
       if (src == null) return load(examples[0]);
       editor.value = clean(src);
       input.value = driver;
+      langPick.value = lang;
       suggested = null;
       picker.value = "";
       run();
     },
-    now: () => ({ code: editor.value, input: input.value }),
+    now: () => ({ code: editor.value, input: input.value, lang: langPick.value }),
   };
 }

@@ -944,6 +944,15 @@ button:disabled {
   text-transform: uppercase;
   color: var(--dim);
 }
+.vz-lang {
+  padding: 3px 6px;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
 .vz-edit {
   margin-left: auto;
   height: 26px;
@@ -1156,12 +1165,28 @@ button:disabled {
   color: var(--dim);
   background: color-mix(in srgb, var(--dim) 14%, transparent);
 }
-.vz-ok.k-def,
-.vz-ok.k-class {
+.vz-ok:is(.k-def, .k-class, .k-function, .k-method) {
   color: var(--acc);
   background: color-mix(in srgb, var(--acc) 15%, transparent);
 }
-.vz-ok:is(.k-for, .k-while, .k-if, .k-elif, .k-else, .k-try, .k-except, .k-finally, .k-with, .k-match, .k-case) {
+.vz-ok:is(
+  .k-for,
+  .k-while,
+  .k-do,
+  .k-if,
+  .k-elif,
+  .k-else,
+  .k-else-if,
+  .k-try,
+  .k-except,
+  .k-catch,
+  .k-finally,
+  .k-with,
+  .k-match,
+  .k-switch,
+  .k-case,
+  .k-default
+) {
   color: color-mix(in srgb, var(--medium) 75%, var(--text));
   background: color-mix(in srgb, var(--medium) 16%, transparent);
 }
@@ -1169,7 +1194,7 @@ button:disabled {
   color: color-mix(in srgb, var(--easy) 80%, var(--text));
   background: color-mix(in srgb, var(--easy) 15%, transparent);
 }
-.vz-ok.k-raise {
+.vz-ok:is(.k-raise, .k-throw) {
   color: var(--hard);
   background: color-mix(in srgb, var(--hard) 14%, transparent);
 }

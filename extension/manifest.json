@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Visualiza: Python Code Visualizer",
+  "name": "Visualiza: Python & JavaScript Code Visualizer",
   "short_name": "Visualiza",
   "version": "0.1.0",
-  "description": "Select Python code on any page, right-click, and replay it step by step: arrays, dicts, trees, graphs, the call tree. Runs offline.",
+  "description": "Select Python or JavaScript on a page, right-click, and replay it step by step: arrays, maps, trees, graphs, call tree. Offline.",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "scripting"],
   "background": {

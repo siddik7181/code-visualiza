@@ -1,6 +1,7 @@
-// The examples in the picker: one per kind of picture the visualizer draws. `input` is the call to run; an empty input runs a script as is,
-// or gets a suggested call for code that only defines functions. check.mjs runs every one of them.
-const ex = (group, title, code, input = "") => ({ group, title, code: code.trim(), input: input.trim() });
+// The examples in the picker: one per kind of picture the visualizer draws, in Python and in JavaScript. `input` is the call to run; an
+// empty input runs a script as is, or gets a suggested call for code that only defines functions. The tests run every one of them.
+const ex = (group, title, code, input = "", lang = "python") => ({ group, title, code: code.trim(), input: input.trim(), lang });
+const js = (title, code, input = "") => ex("JavaScript", title, code, input, "javascript");
 
 export const EXAMPLES = [
   ex(
@@ -255,6 +256,157 @@ class Solution:
             low = min(low, p)
             best = max(best, p - low)
         return best
+`,
+  ),
+  js(
+    "Fibonacci (call tree)",
+    `
+function fib(n) {
+  if (n < 2) return n;
+  return fib(n - 1) + fib(n - 2);
+}
+`,
+    "fib(5)",
+  ),
+  js(
+    "Two Sum (Map)",
+    `
+function twoSum(nums, target) {
+  const seen = new Map();
+  for (let i = 0; i < nums.length; i++) {
+    const need = target - nums[i];
+    if (seen.has(need)) return [seen.get(need), i];
+    seen.set(nums[i], i);
+  }
+  return [];
+}
+`,
+    "twoSum([3, 8, 4, 6, 11], 10)",
+  ),
+  js(
+    "Binary search",
+    `
+function binarySearch(nums, target) {
+  let lo = 0, hi = nums.length - 1;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (nums[mid] === target) return mid;
+    if (nums[mid] < target) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return -1;
+}
+`,
+    "binarySearch([1, 3, 4, 7, 9, 11, 15, 20], 11)",
+  ),
+  js(
+    "Bubble sort (bars)",
+    `
+function bubbleSort(a) {
+  for (let i = 0; i < a.length; i++) {
+    for (let j = 0; j < a.length - 1 - i; j++) {
+      if (a[j] > a[j + 1]) {
+        [a[j], a[j + 1]] = [a[j + 1], a[j]];
+      }
+    }
+  }
+  return a;
+}
+`,
+    "bubbleSort([5, 1, 4, 2, 8, 3])",
+  ),
+  js(
+    "Reverse a linked list",
+    `
+function reverseList(head) {
+  let prev = null;
+  while (head) {
+    const next = head.next;
+    head.next = prev;
+    prev = head;
+    head = next;
+  }
+  return prev;
+}
+`,
+    "reverseList(linked([1, 2, 3, 4]))",
+  ),
+  js(
+    "BFS on a graph (queue)",
+    `
+function bfs(graph, start) {
+  const seen = new Set([start]);
+  const queue = [start];
+  const order = [];
+  while (queue.length) {
+    const node = queue.shift();
+    order.push(node);
+    for (const next of graph[node]) {
+      if (!seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return order;
+}
+`,
+    "bfs({0: [1, 2], 1: [0, 3, 4], 2: [0, 4], 3: [1], 4: [1, 2]}, 0)",
+  ),
+  js(
+    "Min stack (a class)",
+    `
+class MinStack {
+  constructor() {
+    this.stack = [];
+    this.mins = [];
+  }
+  push(x) {
+    this.stack.push(x);
+    if (!this.mins.length || x <= this.mins[this.mins.length - 1]) this.mins.push(x);
+  }
+  pop() {
+    if (this.stack.pop() === this.mins[this.mins.length - 1]) this.mins.pop();
+  }
+  getMin() {
+    return this.mins[this.mins.length - 1];
+  }
+}
+`,
+    `
+const s = new MinStack();
+s.push(5);
+s.push(2);
+s.push(7);
+s.push(1);
+s.pop();
+s.getMin();
+`,
+  ),
+  js(
+    "A plain script (no input)",
+    `
+// Any JavaScript runs: this is a plain script, so the input stays empty
+const text = "the cat and the dog and the bird";
+const counts = {};
+for (const word of text.split(" ")) {
+  counts[word] = (counts[word] || 0) + 1;
+}
+const top = Object.keys(counts).reduce((a, b) => (counts[a] >= counts[b] ? a : b));
+console.log("most common:", top, counts[top]);
+`,
+  ),
+  js(
+    "LeetCode style (input suggested)",
+    `
+var maxProfit = function (prices) {
+  let best = 0, low = Infinity;
+  for (const p of prices) {
+    low = Math.min(low, p);
+    best = Math.max(best, p - low);
+  }
+  return best;
+};
 `,
   ),
 ];
