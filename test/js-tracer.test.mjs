@@ -3,7 +3,7 @@
 // Sval (vendor/sval/README.md).
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { run, suggest } from "../extension/tracer.js";
+import { run, signature, suggest } from "../extension/tracer.js";
 
 const local = (step, name, depth = -1) => step.stack.at(depth).loc.find(([k]) => k === name)?.[1];
 const names = (step, depth = -1) => step.stack.at(depth).loc.map(([k]) => k);
@@ -255,6 +255,150 @@ describe("what the code's usage says about a variable", () => {
     assert.deepEqual(run(code("Math.floor((lo + hi) / 2)"), "bs([1, 2, 3])").pointers.bs.idx.nums, ["hi", "lo", "mid"]);
     assert.deepEqual(run(code("(lo + hi) >> 1"), "bs([1, 2, 3])").pointers.bs.idx.nums, ["hi", "lo", "mid"]);
   });
+
+  test("pivot = nums[(lo + hi) >> 1] doesn't make pivot a pointer (subscript expressions excluded)", () => {
+    const qs = run(
+      "function partition(nums, lo, hi) {\n  const pivot = nums[(lo + hi) >> 1];\n  return pivot;\n}",
+      "partition([3, 1, 4], 0, 2)",
+    );
+    // pivot is a value, not a pointer; only lo, hi should be pointers from the subscript index
+    assert.deepEqual(qs.pointers.partition.idx.nums, ["hi", "lo"]);
+    assert.ok(!qs.pointers.partition.idx.nums.includes("pivot"));
+  });
+
+  test("nested subscripts in comparisons: temps[stack[stack.length - 1]] encodes the subscript", () => {
+    const temps = run(
+      "function f(temps) {\n  const stack = [0];\n  for (let i = 0; i < temps.length; i++) {\n    const t = temps[i];\n    while (stack.length && temps[stack[stack.length - 1]] < t) stack.pop();\n  }\n}",
+      "f([73, 74, 75])",
+    );
+    // The comparison should encode temps[stack[stack.length - 1]]
+    const probe = temps.pointers.f.probes.find((p) => p.line === 5 && p.on === "temps");
+    assert.ok(probe, "should have a probe for temps[...]");
+    assert.deepEqual(probe.e, ["sub", "stack", ["-", ["len", "stack"], ["c", 1]]], "should encode temps[stack[stack.length - 1]]");
+  });
+
+  test("stack.at(-1) and stack.length are encoded as expressions", () => {
+    const code = run(
+      "function f(nums) {\n  const stack = [1, 2];\n  const top = stack.at(-1);\n  const n = stack.length;\n  return top + n;\n}",
+      "f([1, 2, 3])",
+    );
+    // stack.at(-1) should create a probe; length should be derivable
+    const at = code.pointers.f.probes.find((p) => p.on === "stack" && p.kind === "get");
+    assert.ok(at, "should have a probe for stack.at(...)");
+    assert.deepEqual(at.e, ["c", -1], "should encode stack.at(-1) as a subscript");
+  });
+});
+
+describe("what each line reads and writes, and how lists point into each other (as tracer.py)", () => {
+  const at = (p, line) => p.acc.filter((a) => a.line === line);
+
+  test("a DP line reads its sources and writes its cell (1D and 2D); a one-line if's body is on its line", () => {
+    const coin = run(
+      "function f(coins, amount) {\n  const dp = new Array(amount + 1).fill(9);\n  for (let a = 1; a <= amount; a++)\n    for (const c of coins) if (c <= a) dp[a] = Math.min(dp[a], dp[a - c] + 1);\n  return dp[amount];\n}",
+      "f([1], 2)",
+    ).pointers.f;
+    assert.deepEqual(
+      at(coin, 4).map(({ ix, w }) => [JSON.stringify(ix), w]),
+      [
+        ['["n","a"]', true],
+        ['["n","a"]', false],
+        ['["-",["n","a"],["n","c"]]', false],
+      ],
+    );
+    const grid = run(
+      "function g(m, n) {\n  const dp = [[1, 1], [1, 1]];\n  for (let r = 1; r < m; r++)\n    for (let c = 1; c < n; c++) dp[r][c] = dp[r - 1][c] + dp[r][c - 1];\n  return dp;\n}",
+      "g(2, 2)",
+    ).pointers.g;
+    assert.equal(at(grid, 4).length, 3); // a cell is one access, not also a read of its row
+    assert.deepEqual(at(grid, 4)[0], {
+      line: 4,
+      on: "dp",
+      rc: [
+        ["n", "r"],
+        ["n", "c"],
+      ],
+      w: true,
+    });
+  });
+
+  test("leaves out what may not run (a branch of c ? x : y, the right of && / ||)", () => {
+    const p = run(
+      "function f(a, i) {\n  const x = a[i] ? a[0] : a[1];\n  const y = a[2] && a[3];\n  return x + y;\n}",
+      "f([1, 1, 1, 1], 0)",
+    ).pointers.f;
+    assert.deepEqual(
+      at(p, 2).map((a) => a.ix),
+      [["n", "i"]],
+    );
+    assert.deepEqual(
+      at(p, 3).map((a) => a.ix),
+      [["c", 2]],
+    );
+  });
+
+  test("a stack of indexes into a list holds its places (even on the right of &&), and loops over neighbours are named", () => {
+    const p = run(
+      "function f(temps) {\n  const ans = temps.map(() => 0), stack = [];\n  for (let i = 0; i < temps.length; i++) {\n    while (stack.length && temps[stack[stack.length - 1]] < temps[i]) {\n      const j = stack.pop();\n      ans[j] = i - j;\n    }\n    stack.push(i);\n  }\n  return ans;\n}",
+      "f([2, 1, 3])",
+    ).pointers.f;
+    assert.deepEqual(p.holds, { temps: ["stack"], ans: ["stack"] });
+    const g = run("function g(graph, u) {\n  for (const [v, w] of graph[u]) {}\n}", "g({1: [[2, 5]]}, 1)").pointers.g;
+    assert.deepEqual(g.iters, { v: ["graph", "u"] });
+  });
+});
+
+describe("what each test compared", () => {
+  test("if / else if / while / for / do-while tests, their operands' values and what they came out as", () => {
+    const r = run(
+      "function bs(nums, t) {\n  let lo = 0, hi = nums.length - 1;\n  while (lo <= hi) {\n    const mid = (lo + hi) >> 1;\n    if (nums[mid] < t) lo = mid + 1;\n    else if (nums[mid] > t) hi = mid - 1;\n    else return mid;\n  }\n  return -1;\n}",
+      "bs([1, 3, 5, 7], 5)",
+    );
+    assert.deepEqual(
+      r.conds.map((c) => [c.line, c.kind, c.t]),
+      [
+        [3, "while", "lo <= hi"],
+        [5, "if", "nums[mid] < t"],
+        [6, "elif", "nums[mid] > t"],
+      ],
+    );
+    assert.deepEqual(
+      r.conds[1].ops.map(({ on, ix }) => [on, ix]),
+      [
+        ["nums", ["n", "mid"]],
+        ["t", undefined],
+      ],
+    );
+    assert.deepEqual(
+      r.steps.filter((s) => s.cond).map((s) => [s.line, s.cond.o.map(([, v]) => v), s.cond.v]),
+      [
+        [3, [0, 3], true],
+        [5, [3, 5], true],
+        [3, [2, 3], true],
+        [5, [5, 5], false],
+        [6, [5, 5], false],
+      ],
+    );
+    const f = run(
+      "function f(a) {\n  let s = 0;\n  for (let i = 0; i < a.length; i++) s += a[i];\n  do { s--; } while (s > 2);\n  return s;\n}",
+      "f([1, 2])",
+    );
+    assert.deepEqual(
+      f.conds.map((c) => [c.line, c.kind]),
+      [
+        [3, "for"],
+        [4, "while"],
+      ],
+    );
+    assert.deepEqual(
+      f.steps.filter((s) => s.cond).map((s) => s.cond.v),
+      [true, true, false, false],
+    );
+  });
+
+  test("an && that stops early leaves out the operands it didn't work out", () => {
+    const r = run("function f(a, b) {\n  if (a && b > 1) return 1;\n  return 0;\n}", "f(0, 5)");
+    assert.deepEqual(r.steps.find((s) => s.cond).cond, { k: 0, o: [[0, 0]], v: false });
+  });
 });
 
 describe("the statement tree", () => {
@@ -302,5 +446,33 @@ describe("the fixes made to Sval (vendor/sval/README.md)", () => {
   test("an object destructuring assignment assigns to the existing variables", () => {
     assert.equal(run("let a = 1;\nfunction f() {\n  ({ a } = { a: 7 });\n}\nf();\nconsole.log(a);").out, "7\n");
     assert.equal(run("try {\n  throw new Error('boom');\n} catch ({ message }) {\n  console.log(message);\n}").out, "boom\n");
+  });
+});
+
+describe("the signature (as tracer.py's)", () => {
+  const kinds = (code) => signature(code).entries.map((e) => [e.call, e.params.map((p) => `${p.name}:${p.kind}`)]);
+
+  test("LeetCode's JSDoc names the nodes a parameter is", () => {
+    const code =
+      "/**\n * Definition for singly-linked list.\n * function ListNode(val, next) {}\n */\n/**\n * @param {ListNode[]} lists\n * @param {TreeNode} root\n * @param {number} k\n */\nvar f = function(lists, root, k) {\n};";
+    assert.deepEqual(kinds(code), [["f", ["lists:linked[]", "root:tree", "k:null"]]]);
+    assert.deepEqual(kinds("/**\n * @param {_Node} node\n */\nvar clone = function(node) { return node.neighbors; };"), [
+      ["clone", ["node:graph"]],
+    ]);
+  });
+
+  test("without JSDoc, how a parameter is used; the function an input calls first", () => {
+    assert.deepEqual(kinds("function helper(x) { return x; }\nfunction rev(head) { return helper(head.next); }"), [
+      ["rev", ["head:linked"]],
+      ["helper", ["x:null"]],
+    ]);
+  });
+
+  test("a design class written with prototypes; a syntax error", () => {
+    const sig = signature(
+      "var MinStack = function() {};\nMinStack.prototype.push = function(val) {};\nMinStack.prototype.getMin = function() {};",
+    );
+    assert.deepEqual(sig.classes, { MinStack: { init: [], methods: { push: [{ name: "val", kind: null }], getMin: [] } } });
+    assert.match(signature("function (").error, /^The code doesn't run/);
   });
 });

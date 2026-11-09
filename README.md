@@ -11,19 +11,37 @@ JavaScript runs in [Sval](https://github.com/Siubaak/sval), an interpreter); not
 
 - Select code on a page → right-click → **Explain this with Visualiza**. The language is told from the code; the menu above the editor
   switches it.
-- Or click the toolbar icon: the panel opens with examples, and you can type or paste code in it.
+- Or click the toolbar icon: the panel opens with examples, and you can type or paste code in it. The code is always editable (editing
+  clears the run; **Ctrl+Enter** runs it again), and **⌘V** / **Ctrl+V** anywhere in the panel pastes code or test cases and runs them.
 - **⤢** opens the same thing in a tab, for more room (big call trees, two columns).
 
 ## What it shows
 
 - **Data**: every frame on the call stack with its variables, each drawn by what it is and how the code uses it: arrays with their index
   pointers (and a `lo..hi` window), bars for lists sorted in place, grids (DP tables, boards), dicts, sets, linked lists, binary trees,
-  graphs from adjacency lists, heaps as trees, stacks, queues, intervals on a number line, the bits of a number. A caption says what each
-  step changed ("`seen[2] = 0 (new key)`", "`swap a[1] ↔ a[2]`", "next: is `target - x = 6` in seen? no").
-- **Call tree**: every call the run made, growing as it plays. The calls on the stack form the path to the current one, and finished calls
-  show what they returned. Good for recursion, backtracking and divide and conquer. Click a call to jump to it.
+  graphs from adjacency lists, heaps as trees, stacks, queues, intervals on a number line, the bits of a number. The current call and its
+  two callers are open; callers are indented and connected to show the call chain, with a line badge showing where each is paused (hover
+  it to highlight that line in the code). Click a frame's header to open or close it. What a test compares is marked (amber), the two
+  items just swapped too (magenta), and, in sorting code, the items already in their sorted place (green).
+- **How the structures relate**: the items and cells the line that ran read (cyan) and wrote (magenta), and in a DP table or array the
+  cells filled so far (a soft magenta tint), so `dp[a] = min(dp[a], dp[a - c] + 1)` shows where the value came from (a table over two strings has their letters
+  on its rows and columns). A sliding window's `left` is drawn with `right` even when the code never indexes with it. A stack of indexes
+  marks the items it holds (monotonic stack). In divide and conquer, when a call receives a slice of its caller's list, the caller's cells
+  passed to the callee are marked. A graph is drawn in layers (topological, or by distance from the source when it's weighted)
+  with its edge weights; its nodes show what the other variables say about them (in `seen`, waiting in the queue / heap, `dist` /
+  `indegree` per node), and the neighbour the loop is on is named, with the edge to it. A grid shows a recursion's way down (the cells
+  its callers are at), a visited set of `(r, c)` and a queue of them. A lookup that misses (`6 in seen` → no) is shown as a dashed row.
+- **Caption**: what each step changed ("`seen[2] = 0 (new key)`", "`swap a[1] ↔ a[2]`"), what a test came out as with its values put in
+  ("`nums[mid] < target` → `7 < 11` → True, so the if block runs"), the loop pass, and what the next line will check and look up
+  ("next: checks `lo <= hi`, that is `4 <= 7`", "is `target - x = 6` in seen? no").
+- **Call tree**: every call the run made, growing as it plays, with the data under it. The calls on the stack form the path to the current
+  one, and finished calls show what they returned. Good for recursion, backtracking and divide and conquer. A call that redoes an earlier
+  call (same arguments, and it recurses again) is dashed, with how many calls a memo / cache would save. Click a call to jump to it.
 - **Code tree**: the code as a tree of statements (from the language's own parser), with the statements around the current line marked and how
   many times each one has run. Click a statement, or a line of the code, to jump to the next time it runs.
+
+Keys: **←** / **→** step, **Home** / **End**, **space** plays. **Shift+→** steps over a line's calls (**Shift+←** back over them),
+**Shift+↑** steps out to the current call's return, **Shift+↓** goes to the loop's next pass. The ↷ ⤴ ⟳ buttons do the same.
 
 ## What it runs
 
@@ -34,6 +52,12 @@ Python and JavaScript, the same way:
   uses them (a LeetCode-style `var maxProfit = function (prices)` too).
 - **A class**: write the calls (`s = MinStack()` / `const s = new MinStack()`, `s.push(1)`, ...). A LeetCode-style Python `class Solution`
   gets a suggested call on its method; a JavaScript class, or a design problem written with `X.prototype.m = function`, gets calls.
+- **LeetCode test cases**: paste the code from LeetCode's editor as it is, and its test cases into the input as LeetCode shows them: the
+  Testcase tab's values (one per line, or each under its name), a problem's examples (`Input: nums = [2,7,11,15], target = 9`,
+  `Output: [0,1]`), a design problem's two lines (`["MinStack","push",...]` / `[[],[-2],...]`), or a Test Result. They become calls of
+  the code's function (`null` → `None` in Python), with a list built into the `ListNode`, `TreeNode` or graph `Node` a parameter is (from
+  its type hint, JSDoc or docstring, or how the code uses it). Several cases get a tab each, and the result is checked against the
+  expected answer (✓, ✓ in another order, ✗). Code pasted for another problem clears the old test cases.
 - Selected code is cleaned up first: common indentation removed (a method copied out of its class), non-breaking spaces made spaces.
 - Built in, no import or definition needed: `linked([1, 2, 3])` (a linked list), `tree([3, 9, 20, None, None, 15, 7])` (a binary tree,
   level order; `null` in JavaScript), `graph({1: [2], 2: [1]})`, `ListNode`, `TreeNode`; in Python also `heapq`, `deque`, `defaultdict`,
@@ -68,6 +92,7 @@ Python and JavaScript, the same way:
 | `extension/vendor/pyodide/`   | Pyodide 314.0.7 (MPL-2.0), unchanged; see its README                                                                                |
 | `extension/vendor/sval/`      | Sval 0.6.12 (MIT), with three fixes to its `try` / `finally` and destructuring; see its README                                      |
 | `extension/examples.js`       | The examples in the panel                                                                                                           |
+| `extension/leetcode.js`       | LeetCode test cases pasted in the input: read from each way LeetCode shows them, turned into calls, results checked                 |
 | `test/`                       | The tests (below)                                                                                                                   |
 
 ## Development

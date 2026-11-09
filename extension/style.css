@@ -147,19 +147,64 @@ button:disabled {
 .vz-note:empty {
   display: none;
 }
-.vz-code {
+.vz-note code {
+  font: 11px var(--mono);
+  color: var(--text);
+  word-break: break-word;
+}
+/* the test cases pasted in the input: one tab each */
+.vz-cases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.vz-case {
+  padding: 2px 10px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.vz-case[aria-pressed="true"] {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 18%, var(--card));
+  color: var(--text);
+  font-weight: 600;
+}
+/* LeetCode's expected answer, and whether the result is it */
+.vz-result .vz-verdict {
+  font-weight: 700;
+}
+.vz-verdict.same,
+.vz-verdict.order {
+  color: var(--easy);
+}
+.vz-verdict.different {
+  color: var(--hard);
+}
+/* the code: the traced lines (what the run does, under) and the editor (over their source column), scrolling together in one box */
+.vz-codewrap {
   overflow: auto;
   position: relative;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 10px;
+  scroll-behavior: smooth;
+}
+.vz-codewrap:focus-within {
+  border-color: var(--acc);
+}
+.vz-code {
+  position: relative;
+  min-width: max-content;
   padding: 6px 0;
   font:
     12px/1.6 ui-monospace,
     SFMono-Regular,
     Menlo,
     monospace;
-  scroll-behavior: smooth;
+}
+.vz-code .vz-src {
+  color: transparent; /* (the editor over it shows the text) */
 }
 .vz-line {
   display: flex;
@@ -167,6 +212,7 @@ button:disabled {
   padding: 0 10px 0 0;
   border-left: 3px solid transparent;
   white-space: pre;
+  tab-size: 4;
   transition: background var(--vz-dur);
 }
 .vz-ln {
@@ -185,6 +231,10 @@ button:disabled {
   background: color-mix(in srgb, var(--acc) 20%, transparent);
   border-left-color: var(--acc);
 }
+.vz-line.paused-at {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-left-color: color-mix(in srgb, var(--text) 40%, transparent);
+}
 .vz-line.bad {
   background: color-mix(in srgb, var(--hard) 22%, transparent);
   border-left-color: var(--hard);
@@ -198,13 +248,52 @@ button:disabled {
 }
 .vz-step {
   flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   font-size: 11px;
   font-weight: 600;
   color: var(--acc);
 }
+.vz-pass {
+  font-weight: 500;
+  font-size: 10px;
+  color: var(--dim);
+}
+/* what happened (and the next line's test and lookups below it): two lines kept, so the pictures don't jump */
+.vz-say {
+  min-width: 0;
+  min-height: 2.9em;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
 .vz-what {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
+}
+.vz-next {
+  font: 11.5px var(--mono);
+  color: var(--dim);
+}
+.vz-nl {
+  font-weight: 600;
+}
+.vz-cond {
+  padding: 0 4px;
+  border-radius: 4px;
+  font: inherit;
+  color: var(--text);
+  background: color-mix(in srgb, var(--medium) 16%, transparent);
+}
+.vz-tf {
+  padding: 0 5px;
+  border-radius: 4px;
+  color: #fff;
+  background: var(--easy);
+}
+.vz-tf.no {
+  background: var(--hard);
 }
 .vz-stage {
   display: flex;
@@ -219,9 +308,27 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  position: relative;
+  margin-left: var(--indent, 0px);
+}
+/* continuous connector line from caller to callee, drawn with ::before on each non-first frame */
+/* an elbow from the caller's card (just above) into this call's header: who called whom, without words */
+.vz-frame.has-connector::before {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: -9px;
+  width: 9px;
+  height: 24px;
+  border-left: 2px solid color-mix(in srgb, var(--text) 22%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--text) 22%, transparent);
+  border-bottom-left-radius: 6px;
+  pointer-events: none;
 }
 .vz-frame.top {
-  border-color: color-mix(in srgb, var(--acc) 55%, var(--line));
+  border: 1.5px solid color-mix(in srgb, var(--text) 40%, var(--line));
+  background: color-mix(in srgb, var(--text) 3%, var(--card));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--text) 8%, transparent);
 }
 .vz-frame.ret {
   border-color: color-mix(in srgb, var(--easy) 60%, var(--line));
@@ -229,19 +336,68 @@ button:disabled {
 .vz-frame.collapsed {
   padding: 5px 10px;
   gap: 4px;
-  opacity: 0.75;
 }
 .vz-frame.collapsed .vz-structs {
   display: none;
 }
+/* a caller waiting for the call it made: its data, secondary */
+.vz-frame.paused {
+  opacity: 0.75;
+}
+.vz-frame.paused .vz-scalars,
+.vz-frame.paused .vz-structs {
+  font-size: 11px;
+}
 .vz-fhead {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: center;
   font:
     600 11.5px ui-monospace,
     SFMono-Regular,
     Menlo,
     monospace;
   color: var(--dim);
-  white-space: pre;
+}
+.vz-frame:not(.top) .vz-fhead {
+  cursor: pointer;
+}
+.vz-fhead b {
+  color: var(--text);
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vz-caret {
+  width: 10px;
+  flex-shrink: 0;
+}
+.vz-line-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--line);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.vz-line-badge:hover {
+  background: color-mix(in srgb, var(--text) 20%, var(--line));
+  color: var(--text);
+}
+.vz-fstat {
+  font-weight: 400;
+  flex-shrink: 0;
+}
+.vz-frame.ret .vz-fstat {
+  font-weight: 600;
+  color: var(--easy);
 }
 .vz-scalars,
 .vz-set,
@@ -269,10 +425,72 @@ button:disabled {
   color: var(--acc);
   font-weight: 600;
 }
+.vz-var.cmp {
+  border-color: var(--medium);
+  background: color-mix(in srgb, var(--medium) 16%, var(--bg));
+}
+/* a variable that is also drawn on a picture (a pointer, a node's label): its name is underlined the way a link is, and hovering it shows
+   where (see .link) */
+.vz-var.pointer b {
+  text-decoration: underline dotted color-mix(in srgb, var(--acc) 70%, transparent);
+  text-underline-offset: 3px;
+}
+/* hover linking: highlight all instances of a variable */
+.link {
+  box-shadow:
+    0 0 0 2px var(--acc),
+    0 0 8px color-mix(in srgb, var(--acc) 40%, transparent);
+  position: relative;
+  z-index: 1;
+}
+/* SVG elements need fill for the glow */
+svg .link {
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--acc) 60%, transparent));
+}
+.vz-frame {
+  container-type: inline-size;
+  container-name: frame;
+}
 .vz-structs {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+/* responsive grid at wide widths: big structures (graphs, grids, trees, heaps) span full row; small ones (dicts, sets, short arrays) sit side by side */
+@container frame (min-width: 700px) {
+  .vz-frame:not(.collapsed) .vz-structs {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px 16px;
+    align-items: start; /* (a short structure keeps its own height, and so does its active bar) */
+  }
+  .vz-frame:not(.collapsed) .vz-struct.vz-big {
+    grid-column: 1 / -1;
+  }
+}
+.vz-struct {
+  position: relative;
+  transition: opacity 200ms;
+}
+/* in the top frame, de-emphasize inactive structures to focus on what the line touches */
+.vz-frame.top .vz-struct {
+  opacity: 0.65;
+}
+.vz-frame.top .vz-struct:hover,
+.vz-frame.top .vz-struct:focus-within,
+.vz-frame.top .vz-struct.active {
+  opacity: 1;
+}
+/* active structures (touched by the current line) get a 2px left accent in the gutter */
+.vz-struct.active::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: color-mix(in srgb, var(--text) 45%, transparent);
+  border-radius: 1px;
 }
 .vz-sname {
   display: flex;
@@ -328,6 +546,53 @@ button:disabled {
 }
 .vz-cell.out {
   opacity: 0.32;
+}
+/* what a test compares (amber), the two items just swapped (purple), the items already in their sorted place (green) */
+.vz-cell.done {
+  border-color: var(--easy);
+  background: color-mix(in srgb, var(--easy) 14%, var(--bg));
+}
+.vz-cell.swp {
+  border-color: var(--vz-write);
+  background: color-mix(in srgb, var(--vz-write) 20%, var(--bg));
+}
+.vz-cell.cmp,
+.vz-gc.cmp {
+  border-color: var(--medium);
+  background: color-mix(in srgb, var(--medium) 26%, var(--bg));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--medium) 30%, transparent);
+}
+.vz-arr.bars .vz-cell.cmp .vz-bar {
+  background: var(--medium);
+}
+.vz-arr.bars .vz-cell.swp .vz-bar {
+  background: var(--vz-write);
+}
+.vz-arr.bars .vz-cell.done .vz-bar {
+  background: var(--easy);
+}
+.vz-sname .vz-lg {
+  font: 10px var(--mono);
+  font-style: normal;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid;
+  transition: opacity 150ms;
+}
+.vz-lg.dimmed {
+  opacity: 0.35;
+}
+.vz-lg.cmp {
+  border-color: var(--medium);
+  background: color-mix(in srgb, var(--medium) 22%, transparent);
+}
+.vz-lg.swp {
+  border-color: var(--vz-write);
+  background: color-mix(in srgb, var(--vz-write) 18%, transparent);
+}
+.vz-lg.done {
+  border-color: var(--easy);
+  background: color-mix(in srgb, var(--easy) 14%, transparent);
 }
 .vz-v.long,
 .vz-gc.long {
@@ -568,6 +833,13 @@ button:disabled {
   min-width: 60px;
   accent-color: var(--acc);
 }
+.vz-jumps {
+  display: flex;
+  gap: 2px;
+  padding: 0 4px;
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+}
 .vz-count {
   font:
     11px ui-monospace,
@@ -662,7 +934,7 @@ button:disabled {
   height: 34px;
 }
 .vz-node.path {
-  border-color: color-mix(in srgb, var(--acc) 55%, var(--line));
+  border-color: var(--acc);
   border-style: dashed;
 }
 .vz-left > *,
@@ -671,7 +943,7 @@ button:disabled {
 }
 .vz-cells:empty::after {
   content: "empty";
-  padding: 8px 2px;
+  padding: 4px 10px;
   font-size: 11px;
   color: var(--dim);
 }
@@ -719,7 +991,6 @@ button:disabled {
   font-size: 11px;
 }
 .vz-toggle {
-  margin-left: auto;
   padding: 1px 8px;
   height: auto;
   border-radius: 6px;
@@ -729,6 +1000,13 @@ button:disabled {
     Menlo,
     monospace;
   color: var(--dim);
+  opacity: 0;
+  transition: opacity 150ms;
+}
+.vz-struct:hover .vz-toggle,
+.vz-struct:focus-within .vz-toggle,
+.vz-arr.bars .vz-toggle {
+  opacity: 1;
 }
 .vz-ptr.meta {
   color: var(--dim);
@@ -953,35 +1231,72 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 7px;
 }
-.vz-edit {
-  margin-left: auto;
-  height: 26px;
+.vz-hint {
   font-size: 12px;
+  color: var(--dim);
+}
+/* what the marks on the code mean: the line that just ran (green), the one that runs next (accent), how many times each ran */
+.vz-codekey {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
+  color: var(--dim);
 }
-/* the code fills the column: the editor while editing, the traced lines while playing */
-.vz-left > .vz-code,
-.vz-left > .vz-editor {
+.vz-codekey i {
+  font-style: normal;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.vz-codekey i.ran::before,
+.vz-codekey i.cur::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border-left: 3px solid color-mix(in srgb, var(--easy) 70%, transparent);
+  background: color-mix(in srgb, var(--easy) 18%, transparent);
+}
+.vz-codekey i.cur::before {
+  border-left-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 26%, transparent);
+}
+.vz-edited {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--medium);
+}
+/* the code fills the column */
+.vz-left > .vz-codewrap {
   flex: 1 1 0;
   min-height: 200px;
 }
 .vz-editor {
+  position: absolute;
+  top: 0;
+  left: var(--vz-gutter, 69px);
+  z-index: 1;
+  margin: 0;
+  padding: 6px 10px 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
   resize: none;
-  padding: 6px 10px;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 10px;
   outline: none;
+  overflow: hidden;
   font: 12px/1.6 var(--mono);
   tab-size: 4;
   white-space: pre;
-  overflow: auto;
 }
-.vz-editor:focus {
-  border-color: var(--acc);
-}
-.vz-line {
+.vz-ln,
+.vz-hits {
   cursor: pointer;
 }
 .vz-line:hover:not(.cur):not(.ran) {
@@ -1096,6 +1411,45 @@ button:disabled {
 }
 .vz-cnode.bad .vz-cr {
   color: var(--hard);
+}
+/* a call with the same arguments as an earlier one (work a memo would skip), and the others like it while one is current */
+.vz-cnode.rep {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--medium) 75%, var(--line));
+}
+.vz-cnode.rep.twin {
+  background: color-mix(in srgb, var(--medium) 18%, var(--bg));
+  opacity: 1;
+}
+.vz-rep {
+  position: absolute;
+  top: -8px;
+  right: -6px;
+  padding: 0 4px;
+  border-radius: 6px;
+  font: 600 9.5px var(--mono);
+  color: #fff;
+  background: var(--medium);
+}
+.vz-csum {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.vz-csum:empty {
+  display: none;
+}
+/* the call tree with the data under it */
+.vz-right.split > .vz-pane {
+  flex: none;
+  height: clamp(200px, 42vh, 440px);
+  min-height: 140px;
+  resize: vertical;
+}
+.vz-right.split > .vz-stage {
+  flex: 1 1 0;
+  min-height: 200px;
+  overflow: auto;
 }
 .vz-ctree .vz-link {
   transition: opacity var(--vz-dur);
@@ -1218,6 +1572,192 @@ button:disabled {
   background: color-mix(in srgb, var(--acc) 22%, transparent);
 }
 /* narrow screens: one column, the page scrolls */
+/*
+ * Data pane color palette – one meaning per color:
+ *
+ * --medium (amber): being tested / compared only
+ * --vz-read (cyan): read by the line that ran
+ * --vz-write (magenta): written by the line that ran; "filled so far" (soft tint)
+ * --easy (green): finished / visited / done (sorted in place, in visited set, returned)
+ * --acc (indigo): variables and pointers only (variable names, index pointers, nodes a variable points at, edge in focus)
+ * --vz-front (gray): membership in a container (neutral dashed ring) — queue/stack/heap, held by monotonic stack
+ * recursion path: dashed indigo outline (matches NodesView's outer nodes)
+ */
+:root {
+  --vz-read: #12a4c0;
+  --vz-write: #d946ef;
+  --vz-front: light-dark(#6b7280, #9097a6);
+}
+.vz-cell.fill,
+.vz-gc.fill {
+  background: color-mix(in srgb, var(--vz-write) 12%, var(--bg));
+}
+/* Being in a container (held by a monotonic stack, waiting in a queue) or on the recursion's way down is a dashed ring only: what the
+   line does to the cell (compared, read, written) keeps its own colour on top of it. */
+.vz-cell.held,
+.vz-gc.held,
+.vz-cell.front,
+.vz-gc.front {
+  border-style: dashed;
+  border-width: 1.5px;
+  border-color: var(--vz-front);
+}
+.vz-gc.path {
+  border-style: dashed;
+  border-width: 1.5px;
+  border-color: var(--acc);
+}
+.vz-cell.cmp:is(.held, .front, .path),
+.vz-gc.cmp:is(.held, .front, .path) {
+  border-color: var(--medium);
+}
+.vz-cell.seen,
+.vz-gc.seen {
+  background: color-mix(in srgb, var(--easy) 18%, var(--bg));
+}
+.vz-cell.rd,
+.vz-gc.rd {
+  border-color: var(--vz-read);
+  background: color-mix(in srgb, var(--vz-read) 24%, var(--bg));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vz-read) 30%, transparent);
+}
+.vz-cell.wr,
+.vz-gc.wr {
+  border-color: var(--vz-write);
+  background: color-mix(in srgb, var(--vz-write) 34%, var(--bg));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vz-write) 40%, transparent);
+}
+.vz-cell.slice,
+.vz-gc.slice {
+  box-shadow: inset 0 -3px 0 var(--acc);
+}
+.vz-arr.bars .vz-cell.rd .vz-bar {
+  background: var(--vz-read);
+}
+.vz-arr.bars .vz-cell.wr .vz-bar {
+  background: var(--vz-write);
+}
+.vz-lg.rd {
+  border-color: var(--vz-read);
+  background: color-mix(in srgb, var(--vz-read) 20%, transparent);
+}
+.vz-lg.wr {
+  border-color: var(--vz-write);
+  background: color-mix(in srgb, var(--vz-write) 26%, transparent);
+}
+.vz-lg.fill {
+  border-color: color-mix(in srgb, var(--vz-write) 45%, var(--line));
+  background: color-mix(in srgb, var(--vz-write) 12%, transparent);
+}
+.vz-lg.held {
+  border: 1px dashed var(--vz-front);
+}
+.vz-lg.slice {
+  border-color: var(--acc);
+  box-shadow: inset 0 -2px 0 var(--acc);
+}
+.vz-lg.path {
+  border: 1px dashed var(--acc);
+}
+.vz-lg.seen {
+  border-color: var(--easy);
+  background: color-mix(in srgb, var(--easy) 18%, transparent);
+}
+.vz-lg.front {
+  border: 1px dashed var(--vz-front);
+}
+.vz-lg.note {
+  border-color: var(--line);
+  color: var(--dim);
+}
+/* Persistent marks for changes (new keys, changed values, newly added items) */
+.vz-kv.wr,
+.vz-sitem.wr {
+  border-color: var(--vz-write);
+  background: color-mix(in srgb, var(--vz-write) 20%, var(--bg));
+}
+.vz-chip.wr,
+.vz-var.wr {
+  border-color: var(--vz-write);
+  background: color-mix(in srgb, var(--vz-write) 18%, var(--bg));
+}
+.vz-node.wr {
+  border-color: var(--vz-write);
+  background: color-mix(in srgb, var(--vz-write) 22%, var(--bg));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vz-write) 30%, transparent);
+}
+/* a DP table over two strings: each row / column header has its letter under its index */
+.vz-grid.axes .vz-gh {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
+}
+.vz-gh i {
+  font-style: normal;
+}
+.vz-gh b {
+  color: var(--text);
+  font-size: 11.5px;
+}
+/* a lookup that won't find its key */
+.vz-kv.miss,
+.vz-chip.miss {
+  color: var(--dim);
+}
+.vz-chip.miss {
+  border-style: dashed;
+}
+.vz-kv.miss {
+  border-top: 1px dashed var(--vz-front);
+  background: color-mix(in srgb, var(--vz-front) 8%, transparent);
+}
+.vz-kv.miss .vz-val {
+  font-style: italic;
+}
+/* graph nodes: visited (green), waiting in a queue / stack / heap (amber ring), a number kept per node (under it), the edge looked at */
+.vz-node.seen {
+  background: color-mix(in srgb, var(--easy) 22%, var(--bg));
+  border-color: color-mix(in srgb, var(--easy) 70%, var(--line));
+}
+.vz-node.front {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vz-front) 70%, transparent);
+}
+.vz-node.hot {
+  border-color: var(--acc);
+  border-width: 2px;
+}
+/* (a badge at the top right: edges leave a node in a layered graph from its bottom and come in at its top) */
+.vz-gn {
+  position: absolute;
+  top: -7px;
+  left: 26px;
+  white-space: nowrap;
+  font: 600 10px/14px var(--mono);
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 4px;
+}
+.vz-gn:empty {
+  display: none;
+}
+.vz-link.cur {
+  stroke: var(--acc);
+  stroke-width: 2.6;
+}
+.vz-ew {
+  font: 600 10px var(--mono);
+  fill: var(--dim);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--card);
+  stroke-width: 3px;
+}
+.vz-ew.cur {
+  fill: var(--acc);
+}
 @media (max-width: 860px) {
   .vz-tagline {
     display: none;
@@ -1234,12 +1774,8 @@ button:disabled {
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
-  .vz-left > .vz-code,
-  .vz-left > .vz-editor {
+  .vz-left > .vz-codewrap {
     flex: none;
-    height: 40vh;
-  }
-  .vz-left > .vz-code {
     height: auto; /* short code leaves the room to the pictures (a side panel is narrow) */
     max-height: 40vh;
     min-height: 0;
@@ -1253,4 +1789,29 @@ button:disabled {
     flex: none;
     height: 60vh;
   }
+  .vz-right.split > .vz-pane {
+    height: 40vh;
+  }
+  .vz-controls {
+    flex-wrap: wrap;
+  }
+  /* the buttons on one row, the slider and the speed under them */
+  .vz-slider {
+    order: 1;
+    flex-basis: 60%;
+  }
+  .vz-controls > .vz-btn:last-child {
+    order: 2;
+  }
+  .vz-count {
+    margin-left: auto;
+  }
+  .vz-right.split > .vz-stage {
+    flex: none;
+    overflow: visible;
+  }
+}
+/* a frame with only numbers (fib(n)) has no pictures: no empty row under its chips */
+.vz-structs:empty {
+  display: none;
 }

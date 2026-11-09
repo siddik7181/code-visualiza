@@ -64,6 +64,26 @@ async function runCode(page, code, input = "") {
   await page.click(".vz-run");
   await idle(page);
 }
+/** Pastes text the way ⌘V does: into `sel` (all of it selected), or into the page when sel is null. @param {import("puppeteer-core").Page} page */
+async function paste(page, sel, text) {
+  await page.evaluate(
+    (sel, text) => {
+      const box = sel && /** @type {HTMLTextAreaElement} */ (document.querySelector(sel));
+      const t = box || document.body;
+      if (box) {
+        box.focus();
+        box.select();
+      }
+      const data = new DataTransfer();
+      data.setData("text/plain", text);
+      t.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    },
+    sel,
+    text,
+  );
+  await page.waitForFunction(() => !document.querySelector(".vz-run:disabled"));
+  await idle(page);
+}
 /** @param {import("puppeteer-core").Page} page @param {import("puppeteer-core").KeyInput} key */
 const press = async (page, key, times = 1) => {
   for (let k = 0; k < times; k++) await page.keyboard.press(key);
@@ -120,6 +140,12 @@ describe("the extension in Chrome", { skip: !existsSync(CHROME) && `no Chrome at
     assert.equal(await shown(), 15); // fib(5) makes 15 calls
     await clickText(page, "button.vz-cnode", "fib(3)");
     assert.match((await view(page)).caption, /fib\(n=3\)/);
+    assert.equal(await page.$eval(".vz-stage", (e) => e.hasAttribute("hidden")), false); // the data stays in view under the call tree
+    assert.match(await page.$eval(".vz-csum", (e) => e.textContent), /^15 calls · 3 redo an earlier call/);
+    await page.keyboard.down("Shift");
+    await press(page, "ArrowUp"); // step out: to fib(3)'s return
+    await page.keyboard.up("Shift");
+    assert.match((await view(page)).caption, /fib returns 2/);
     await page.close();
   });
 
@@ -230,6 +256,58 @@ describe("the extension in Chrome", { skip: !existsSync(CHROME) && `no Chrome at
     await page.close();
   });
 
+  test("LeetCode test cases pasted in the input run as calls of the code, one tab per case, checked against the answer", async () => {
+    const page = await openPanel();
+    const code =
+      "class Solution:\n    def twoSum(self, nums: List[int], target: int) -> List[int]:\n        seen = {}\n        for i, x in enumerate(nums):\n" +
+      "            if target - x in seen:\n                return [seen[target - x], i]\n            seen[x] = i";
+    await runCode(page, code);
+    await paste(
+      page,
+      "textarea.vz-input",
+      "Example 1:\nInput: nums = [2,7,11,15], target = 9\nOutput: [0,1]\n\nExample 2:\nInput: nums = [3,2,4], target = 6\nOutput: [2,1]",
+    );
+    assert.deepEqual(await page.$$eval("button.vz-case", (bs) => bs.map((b) => `${b.textContent}${b.ariaPressed === "true" ? "*" : ""}`)), [
+      "Case 1*",
+      "Case 2",
+    ]);
+    assert.equal(await page.$eval(".vz-note", (e) => e.textContent), "Case 1: ran Solution().twoSum([2, 7, 11, 15], 9)");
+    await page.click("button.vz-case:nth-child(2)");
+    await idle(page);
+    await press(page, "End");
+    assert.match((await view(page)).out, /Result \[1, 2\] · expected \[2,1\] ✓ same items, in another order/);
+    await page.close();
+  });
+
+  test("code pasted anywhere in the panel replaces the code (its language detected) and runs; a node parameter is built", async () => {
+    const page = await openPanel();
+    await paste(
+      page,
+      null,
+      "/**\n * @param {ListNode} head\n */\nvar reverseList = function(head) {\n  let prev = null;\n  while (head) [head.next, prev, head] = [prev, head, head.next];\n  return prev;\n};",
+    );
+    assert.equal(await page.$eval("select.vz-lang", (e) => e.value), "javascript");
+    await paste(page, null, "head =\n[1,2,3]");
+    await press(page, "End");
+    assert.match((await view(page)).out, /Result ListNode \[3,2,1\]/);
+    await page.close();
+  });
+
+  test("the code is always editable: editing clears the run, Ctrl+Enter runs it again", async () => {
+    const page = await openPanel();
+    await page.focus("textarea.vz-editor");
+    await page.keyboard.type("# hi\n");
+    assert.equal(await page.$$eval(".vz-frame", (f) => f.length), 0);
+    assert.match((await view(page)).caption, /The code changed/);
+    await page.keyboard.down("Control");
+    await press(page, "Enter");
+    await page.keyboard.up("Control");
+    await idle(page);
+    await press(page, "ArrowRight", 2); // (the run took the keys back from the code)
+    assert.equal((await view(page)).step, 3);
+    await page.close();
+  });
+
   test("the selection is read with its line breaks, from the page and from a text box", async () => {
     const page = await browser.newPage();
     await page.setContent(
@@ -245,6 +323,27 @@ describe("the extension in Chrome", { skip: !existsSync(CHROME) && `no Chrome at
     const fromTextarea = await page.evaluate(selectedText);
     assert.equal(fromPre, "def f(n):\n    if n:\n        return 1");
     assert.equal(fromTextarea, "for i in range(3):\n    x += i");
+    await page.close();
+  });
+
+  test("hovering a chip highlights its pointer and the cell it points at", async () => {
+    const page = await openPanel();
+    await page.select("#examples", String(EXAMPLES.findIndex((e) => e.title === "Binary search")));
+    await idle(page);
+    await press(page, "ArrowRight", 5);
+    // hover a chip that's also drawn as a pointer
+    const chip = await page.$("span.vz-var[data-var='mid']");
+    assert.ok(chip, "mid chip exists");
+    await chip.hover();
+    // check that the pointer gets the .link class
+    const linkedPointer = await page.$eval(".vz-ptr[data-var='mid'].link", (el) => el.textContent);
+    assert.equal(linkedPointer, "mid", "pointer gets .link on hover");
+    // check that the cell also gets .link
+    const linkedCell = await page.$(".vz-cell.link[data-var*='mid']");
+    assert.ok(linkedCell, "cell pointed at by mid gets .link");
+    // check that the chip itself gets .link
+    const chipLinked = await page.$eval("span.vz-var[data-var='mid'].link", (el) => !!el);
+    assert.ok(chipLinked, "chip gets .link on hover");
     await page.close();
   });
 });

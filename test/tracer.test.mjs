@@ -2,7 +2,7 @@
 // and the statement tree.
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { trace, suggest, local } from "./python.mjs";
+import { trace, suggest, local, signature } from "./python.mjs";
 
 const TWO_SUM =
   "def twoSum(nums, target):\n    seen = {}\n    for i, x in enumerate(nums):\n        if target - x in seen:\n            return [seen[target - x], i]\n        seen[x] = i";
@@ -197,8 +197,140 @@ describe("what the code's usage says about a variable", () => {
     assert.deepEqual(sum.pointers.f.idx.nums, ["i", "j"]);
   });
 
+  test("pivot = nums[(lo + hi) // 2] doesn't make pivot a pointer (subscript expressions excluded)", () => {
+    const qs = trace("def partition(nums, lo, hi):\n    pivot = nums[(lo + hi) // 2]\n    return pivot", "partition([3, 1, 4], 0, 2)");
+    // pivot is a value, not a pointer; only lo, hi should be pointers from the subscript index
+    assert.deepEqual(qs.pointers.partition.idx.nums, ["hi", "lo"]);
+    assert.ok(!qs.pointers.partition.idx.nums.includes("pivot"));
+  });
+
+  test("nested subscripts in comparisons: temps[stack[-1]] encodes the subscript", () => {
+    const temps = trace(
+      "def f(temps):\n    stack = [0]\n    for i, t in enumerate(temps):\n        while stack and temps[stack[-1]] < t:\n            stack.pop()",
+      "f([73, 74, 75])",
+    );
+    // The comparison should encode temps[stack[-1]]; stack[-1] is a subscript expression
+    const probe = temps.pointers.f.probes.find((p) => p.line === 4 && p.on === "temps");
+    assert.ok(probe, "should have a probe for temps[...]");
+    assert.deepEqual(probe.e, ["sub", "stack", ["c", -1]], "should encode temps[stack[-1]]");
+  });
+
+  test("len(name) is encoded as an expression", () => {
+    const code = trace("def f(nums):\n    n = len(nums)\n    for i in range(n):\n        nums[i] = i", "f([1, 2, 3])");
+    // len(nums) should be in the derived pointers for nums (n is derived from nums)
+    assert.deepEqual(code.pointers.f.idx.nums, ["i", "n"]);
+  });
+
   test("a script's top level is analysed under the name of its frame", () => {
     assert.deepEqual(trace("a = [3, 1]\nfor i in range(len(a)):\n    a[i] += 1").pointers["<module>"].idx.a, ["i"]);
+  });
+});
+
+describe("what each line reads and writes, and how lists point into each other", () => {
+  const at = (p, line) => p.acc.filter((a) => a.line === line).map(({ on, ix, rc, w }) => ({ on, ...(ix ? { ix } : { rc }), w }));
+
+  test("a DP line reads its sources and writes its cell (1D and 2D)", () => {
+    const coin = trace(
+      "def f(coins, amount):\n    dp = [9] * (amount + 1)\n    for a in range(1, amount + 1):\n        for c in coins:\n            dp[a] = min(dp[a], dp[a - c] + 1)\n    return dp[amount]",
+      "f([1], 2)",
+    ).pointers.f;
+    assert.deepEqual(
+      at(coin, 5).sort((x, y) => +x.w - +y.w || JSON.stringify(x).localeCompare(JSON.stringify(y))),
+      [
+        { on: "dp", ix: ["-", ["n", "a"], ["n", "c"]], w: false },
+        { on: "dp", ix: ["n", "a"], w: false },
+        { on: "dp", ix: ["n", "a"], w: true },
+      ],
+    );
+    const grid = trace(
+      "def g(m, n):\n    dp = [[1] * n for _ in range(m)]\n    for r in range(1, m):\n        for c in range(1, n):\n            dp[r][c] = dp[r - 1][c] + dp[r][c - 1]\n    return dp",
+      "g(2, 2)",
+    ).pointers.g;
+    // a cell is one access, not also a read of its row
+    assert.deepEqual(at(grid, 5).length, 3);
+    assert.deepEqual(at(grid, 5).find((a) => a.w).rc, [
+      ["n", "r"],
+      ["n", "c"],
+    ]);
+  });
+
+  test("leaves out what may not run (a branch of x if c else y, the right of and / or), and what's in the body", () => {
+    const p = trace(
+      "def f(a, i):\n    x = a[0] if a[i] else a[1]\n    y = a[2] and a[3]\n    if a[4]:\n        z = a[5]\n    return x",
+      "f([1, 1, 1, 1, 1, 1], 0)",
+    ).pointers.f;
+    assert.deepEqual(
+      at(p, 2).map((a) => a.ix),
+      [["n", "i"]],
+    );
+    assert.deepEqual(
+      at(p, 3).map((a) => a.ix),
+      [["c", 2]],
+    );
+    assert.deepEqual(
+      at(p, 4).map((a) => a.ix),
+      [["c", 4]],
+    );
+  });
+
+  test("a stack of indexes into a list holds its places (directly, or through j = stack.pop())", () => {
+    const p = trace(
+      "def f(temps):\n    ans = [0] * len(temps)\n    stack = []\n    for i, t in enumerate(temps):\n        while stack and temps[stack[-1]] < t:\n            j = stack.pop()\n            ans[j] = i - j\n        stack.append(i)\n    return ans",
+      "f([2, 1, 3])",
+    ).pointers.f;
+    assert.deepEqual(p.holds, { temps: ["stack"], ans: ["stack"] });
+  });
+
+  test("a loop over a node's neighbours names the neighbour and the node", () => {
+    const p = trace(
+      "def f(graph, u):\n    for v, w in graph[u]:\n        pass\n    for x in graph[v]:\n        pass",
+      "f({1: [(2, 5)], 2: []}, 1)",
+    ).pointers.f;
+    assert.deepEqual(p.iters, { v: ["graph", "u"], x: ["graph", "v"] });
+  });
+});
+
+describe("what each test compared", () => {
+  const BS =
+    "def bs(nums, t):\n    lo, hi = 0, len(nums) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if nums[mid] < t:\n            lo = mid + 1\n        elif nums[mid] > t:\n            hi = mid - 1\n        else:\n            return mid\n    return -1";
+
+  test("each while / if / elif test: its text, its operands (what they read), their values and what it came out as", () => {
+    const r = trace(BS, "bs([1, 3, 5, 7], 5)");
+    assert.deepEqual(
+      r.conds.map((c) => [c.line, c.kind, c.t]),
+      [
+        [3, "while", "lo <= hi"],
+        [5, "if", "nums[mid] < t"],
+        [7, "elif", "nums[mid] > t"],
+      ],
+    );
+    const c = r.conds[1];
+    assert.deepEqual(
+      c.ops.map(({ a, b, ...o }) => [c.t.slice(a, b), o]),
+      [
+        ["nums[mid]", { on: "nums", ix: ["n", "mid"] }],
+        ["t", { on: "t" }],
+      ],
+    );
+    assert.deepEqual(
+      r.steps.filter((s) => s.cond).map((s) => [s.line, s.cond.o.map(([, v]) => v), s.cond.v]),
+      [
+        [3, [0, 3], true],
+        [5, [3, 5], true],
+        [3, [2, 3], true],
+        [5, [5, 5], false],
+        [7, [5, 5], false],
+      ],
+    );
+  });
+
+  test("an and / or that stops early leaves out the operands it didn't work out; the run is unchanged", () => {
+    const r = trace("def f(a, b):\n    if a and b > 1:\n        return 1\n    return 0", "f(0, 5)");
+    assert.deepEqual(r.steps.find((s) => s.cond).cond, { k: 0, o: [[0, 0]], v: false });
+    assert.deepEqual(
+      r.steps.map((s) => `${s.ev}:${s.line}`),
+      ["call:1", "line:2", "line:4", "return:4"],
+    );
   });
 });
 
@@ -217,5 +349,42 @@ describe("the statement tree", () => {
 
   test("is empty for code that doesn't parse", () => {
     assert.deepEqual(trace("def f(:").outline, []);
+  });
+});
+
+describe("the signature (what a LeetCode test case is turned into a call with)", () => {
+  const kinds = (code) => signature(code).entries.map((e) => [e.call, e.params.map((p) => `${p.name}:${p.kind}`)]);
+
+  test("the parameters of class Solution's method, and the nodes LeetCode builds for them: from type hints", () => {
+    assert.deepEqual(kinds("class Solution:\n    def twoSum(self, nums: List[int], target: int) -> List[int]:\n        pass"), [
+      ["Solution().twoSum", ["nums:null", "target:null"]],
+    ]);
+    assert.deepEqual(
+      kinds("class Solution:\n    def merge(self, lists: List[Optional[ListNode]], root: Optional[TreeNode]):\n        pass"),
+      [["Solution().merge", ["lists:linked[]", "root:tree"]]],
+    );
+  });
+
+  test("from a docstring's :type, or from how the parameter is used (a Node with neighbours is a graph)", () => {
+    assert.deepEqual(
+      kinds('class Solution(object):\n    def f(self, head):\n        """\n        :type head: ListNode\n        """\n        return 1'),
+      [["Solution().f", ["head:linked"]]],
+    );
+    assert.deepEqual(kinds("def clone(node: 'Node'):\n    return node.neighbors"), [["clone", ["node:graph"]]]);
+    assert.deepEqual(kinds("def depth(root):\n    return depth(root.left)"), [["depth", ["root:tree"]]]);
+  });
+
+  test("every function, the one an input calls first; a design class's methods; a syntax error", () => {
+    assert.deepEqual(
+      signature("def helper(x):\n    return x\ndef main(a, b):\n    return helper(a)").entries.map((e) => e.call),
+      ["main", "helper"],
+    );
+    assert.deepEqual(
+      signature("class MinStack:\n    def __init__(self, cap):\n        pass\n    def push(self, val):\n        pass").classes,
+      {
+        MinStack: { init: [{ name: "cap", kind: null }], methods: { push: [{ name: "val", kind: null }] } },
+      },
+    );
+    assert.match(signature("def f(:").error, /^The code doesn't run: SyntaxError/);
   });
 });

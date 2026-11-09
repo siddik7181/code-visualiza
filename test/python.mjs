@@ -12,5 +12,7 @@ const run = py.globals.get("run");
 export const trace = (code, driver = "") => JSON.parse(run(code, driver, "", "trace"));
 /** The call suggested for code that only defines things; `text` may name example values (nums=[2,7]). */
 export const suggest = (code, text = "") => JSON.parse(run(code, "", text, "suggest"));
+/** What a LeetCode test case is turned into a call with (tracer.py's signature()). */
+export const signature = (code) => JSON.parse(run(code, "", "", "signature"));
 /** A variable's encoded value in a step (the top frame by default). */
 export const local = (step, name, depth = -1) => step.stack.at(depth).loc.find(([k]) => k === name)?.[1];

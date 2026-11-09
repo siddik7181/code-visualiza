@@ -175,7 +175,7 @@ const oneLineCallback = (fn, parent) =>
   parent.arguments.includes(fn);
 
 // ---------------------------------------------------------------- rewriting the code to report its steps
-function instrument(src, ast, script) {
+function instrument(src, ast, script, conds = []) {
   const lineOf = lineIndex(src);
   const edits = []; // [pos, 0 = closing | 1 = opening, order at the same place, text]
   const open = (pos, depth, text) => edits.push([pos, 1, depth, text]);
@@ -217,9 +217,25 @@ function instrument(src, ast, script) {
     statement(b, ctx, depth + 1);
     if (traced(ctx)) close(b.end, depth, " }");
   }
-  // if / while / do-while / switch: a step before each test, inside it: (__S(...), test)
-  function test(t, ctx, depth, line) {
-    if (traced(ctx)) {
+  // if / while / do-while / for / switch: a step before each test, inside it: (__S(...), test). An if's / a loop's test also reports what
+  // it compared (__O for each operand, __T for the outcome), for the table `conds` (the format tracer.py writes).
+  function test(t, ctx, depth, line, kind = "") {
+    if (traced(ctx) && kind && t.type !== "SequenceExpression") {
+      const ops = operands(t);
+      const cid = conds.length;
+      conds.push({
+        line,
+        kind,
+        t: src.slice(t.start, t.end),
+        ops: ops.map((o) => ({ a: o.start - t.start, b: o.end - t.start, ...operandInfo(o) })),
+      });
+      open(t.start, depth, `(__S(${line}, ${vars(ctx)}, ${cid}), __T(${cid}, `);
+      close(t.end, depth, "))");
+      ops.forEach((o, i) => {
+        open(o.start, depth + 0.5, `__O(${cid}, ${i}, `);
+        close(o.end, depth + 0.5, ")");
+      });
+    } else if (traced(ctx)) {
       open(t.start, depth, `(__S(${line}, ${vars(ctx)}), `);
       close(t.end, depth, ")");
     }
@@ -264,20 +280,20 @@ function instrument(src, ast, script) {
       case "BlockStatement":
         return list(n.body, withBlock(ctx, declaredIn(n.body)), depth + 1);
       case "IfStatement":
-        test(n.test, ctx, depth + 1, lineOf(n.start));
+        test(n.test, ctx, depth + 1, lineOf(n.start), parent?.type === "IfStatement" && parent.alternate === n ? "elif" : "if");
         body(n.consequent, ctx, depth + 1);
         if (n.alternate) n.alternate.type === "IfStatement" ? node(n.alternate, n, ctx, depth + 1) : body(n.alternate, ctx, depth + 1);
         return;
       case "WhileStatement":
-        test(n.test, ctx, depth + 1, lineOf(n.start));
+        test(n.test, ctx, depth + 1, lineOf(n.start), "while");
         return body(n.body, ctx, depth + 1);
       case "DoWhileStatement":
         body(n.body, ctx, depth + 1);
-        return test(n.test, ctx, depth + 1, lineOf(n.test.start));
+        return test(n.test, ctx, depth + 1, lineOf(n.test.start), "while");
       case "ForStatement": {
         const head = n.init?.type === "VariableDeclaration" && n.init.kind !== "var" ? withBlock(ctx, declaredIn([n.init])) : ctx;
         if (n.init) node(n.init, n, head, depth + 1);
-        if (n.test) test(n.test, head, depth + 1, lineOf(n.start));
+        if (n.test) test(n.test, head, depth + 1, lineOf(n.start), "for");
         else if (t) {
           const semi = src.indexOf(";", n.init ? n.init.end : src.indexOf("(", n.start) + 1);
           open(semi + 1, depth + 1, ` __S(${lineOf(n.start)}, ${vars(head)}), true`);
@@ -427,7 +443,7 @@ const syntaxError = (e) => {
  * level is recorded too (it runs by itself), except the statements that only define things. */
 export function trace(code, driver = "", script = false) {
   const steps = [];
-  const result = { steps, error: null, truncated: false, result: null, out: "" };
+  const result = { steps, error: null, truncated: false, result: null, out: "", conds: [] };
   let ast, input;
   try {
     ast = parse(code);
@@ -446,7 +462,7 @@ export function trace(code, driver = "", script = false) {
   const last = input.body.at(-1);
   if (last?.type === "ExpressionStatement")
     run = `${driver.slice(0, last.expression.start)}__RESULT((${driver.slice(last.expression.start, last.expression.end)}))${driver.slice(last.expression.end)}`;
-  const source = `__GLOBAL(globalThis);${instrument(code, ast, script)}\n;\n${run}`;
+  const source = `__GLOBAL(globalThis);${instrument(code, ast, script, result.conds)}\n;\n${run}`;
 
   const enc = new Encoder();
   const stack = []; // { fn, id, line, vars } for each call being run
@@ -486,11 +502,20 @@ export function trace(code, driver = "", script = false) {
     steps.push(s);
   };
   const frame = (id) => (id === -1 ? stack.at(-1) : stack.find((f) => f.id === id));
-  const S = (line, vars) => {
+  const S = (line, vars, cid) => {
     const f = stack.at(-1);
     f.line = line;
     f.vars = vars;
     snap("line", line);
+    if (cid !== undefined) {
+      f.pending = /** @type {{cond: {k: number, o: unknown[][], v: boolean | null}, heap: object}} */ (steps.at(-1));
+      f.pending.cond = { k: cid, o: [], v: null };
+    }
+  };
+  // the if / loop test being worked out in the running function, when it is test `cid`
+  const pendingTest = (cid) => {
+    const f = stack.at(-1);
+    return f?.pending?.cond.k === cid ? f : null;
   };
   const runtime = {
     __GLOBAL: (g) => (sandboxGlobal = g),
@@ -500,6 +525,19 @@ export function trace(code, driver = "", script = false) {
       return ids;
     },
     __S: S,
+    __O(cid, i, v) {
+      const f = pendingTest(cid);
+      if (f) f.pending.cond.o.push([i, enc.value(v, f.pending.heap)]);
+      return v;
+    },
+    __T(cid, v) {
+      const f = pendingTest(cid);
+      if (f) {
+        f.pending.cond.v = !!v;
+        f.pending = null;
+      }
+      return v;
+    },
     __R(id, line, v) {
       const f = frame(id);
       if (f) {
@@ -567,6 +605,10 @@ function expr(n) {
   if (n.type === "Identifier") return ["n", n.name];
   if (n.type === "Literal" && Number.isInteger(n.value)) return ["c", n.value];
   if (n.type === "UnaryExpression" && n.operator === "-") {
+    // Simplify -constant to a negative constant
+    if (n.argument.type === "Literal" && Number.isInteger(n.argument.value)) {
+      return ["c", -n.argument.value];
+    }
     const a = expr(n.argument);
     return a && ["neg", a];
   }
@@ -587,8 +629,57 @@ function expr(n) {
       return a && b && ["//", a, b];
     }
   }
+  // name.length: the length of a list
+  if (n.type === "MemberExpression" && !n.computed && n.object.type === "Identifier" && n.property.name === "length") {
+    return ["len", n.object.name];
+  }
+  // name.at(-1): list element at index -1 (or other constant)
+  if (
+    n.type === "CallExpression" &&
+    n.callee.type === "MemberExpression" &&
+    !n.callee.computed &&
+    n.callee.object.type === "Identifier" &&
+    n.callee.property.name === "at" &&
+    n.arguments.length === 1
+  ) {
+    const idx = expr(n.arguments[0]);
+    return idx && ["sub", n.callee.object.name, idx];
+  }
+  // Subscript of a list variable: temps[stack[stack.length - 1]]
+  if (n.type === "MemberExpression" && n.computed && n.object.type === "Identifier") {
+    const idx = expr(n.property);
+    return idx && ["sub", n.object.name, idx];
+  }
   return null;
 }
+
+// ---------------------------------------------------------------- the values an if / a loop compares
+const constant = (n) =>
+  n.type === "Literal" ||
+  (n.type === "UnaryExpression" && n.argument.type === "Literal") ||
+  (n.type === "Identifier" && n.name === "undefined");
+const COMPARE = new Set(["<", "<=", ">", ">=", "==", "!=", "===", "!==", "in"]);
+/** The parts of a test whose values explain it: each side of a comparison, each part of an && / || (constants say themselves) */
+function operands(n) {
+  if (n.type === "SequenceExpression") return []; // (a, b): not one value to pass on
+  if (n.type === "LogicalExpression") return [...operands(n.left), ...operands(n.right)];
+  if (n.type === "UnaryExpression" && n.operator === "!") return operands(n.argument);
+  if (n.type === "BinaryExpression" && COMPARE.has(n.operator)) return [n.left, n.right].filter((x) => !constant(x));
+  if (n.type === "BinaryExpression" && n.operator === "instanceof") return constant(n.left) ? [] : [n.left];
+  return constant(n) ? [] : [n];
+}
+/** What an operand reads, so the panel can mark it: a variable ({on}), an array's item ({on, ix}) or a grid's cell ({on, rc}) */
+function operandInfo(n) {
+  if (target(n)) return { on: target(n) };
+  if (n.type === "MemberExpression" && n.computed) {
+    const inner = n.object;
+    if (inner.type === "MemberExpression" && inner.computed && target(inner.object) && expr(inner.property) && expr(n.property))
+      return { on: target(inner.object), rc: [expr(inner.property), expr(n.property)] };
+    if (target(inner) && expr(n.property)) return { on: target(inner), ix: expr(n.property) };
+  }
+  return {};
+}
+
 const midpoint = (n) => {
   let found = false;
   walk(n, (x) => {
@@ -603,6 +694,71 @@ const midpoint = (n) => {
   });
   return found;
 };
+
+const isStatement = (n) => /Statement$|^VariableDeclaration$/.test(n.type) && n.type !== "BlockStatement";
+/** What each line reads and writes, and how variables point into each other (the format tracer.py's links() writes): "acc": each item
+ * (nums[i - 1]) or cell (dp[i][j]) a line reads or writes (w); "iters": `for (const v of graph[key])`; "holds": a list whose items are
+ * places in another (temps[stack[stack.length - 1]], or j = stack.pop() then ans[j]). */
+function links(fn, idx, lineOf) {
+  const acc = [],
+    iters = {},
+    holds = {},
+    popped = {};
+  const hold = (on, by) => on !== by && (holds[on] ||= new Set()).add(by);
+  const stmts = [];
+  walk(fn.type === "Program" ? { type: "X", body: fn.body } : fn.body, (n) => {
+    if (FUNCTIONS.has(n.type) || n.type === "ClassDeclaration" || n.type === "ClassExpression") return false;
+    if (isStatement(n)) stmts.push(n);
+  });
+  // an item of a list: stack.pop(), q.shift(), stack[stack.length - 1], stack.at(-1)
+  const itemOf = (v) => {
+    if (!v) return null;
+    if (v.type === "CallExpression" && v.callee.type === "MemberExpression" && ["pop", "shift", "at"].includes(v.callee.property.name))
+      return target(v.callee.object);
+    if (v.type === "MemberExpression" && v.computed && v.property.type !== "Identifier") return target(v.object);
+    return null;
+  };
+  for (const s of stmts) {
+    const line = lineOf(s.start);
+    const rows = new Set();
+    // `maybe`: inside what may not run (the branches of a ? b : c, the right of && / || / ??): how lists point into each other counts,
+    // what was read doesn't
+    const visit = (maybe) =>
+      function see(n, p) {
+        if (isStatement(n) || FUNCTIONS.has(n.type)) return false;
+        if (!maybe && (n.type === "ConditionalExpression" || n.type === "LogicalExpression")) {
+          walk(n.type === "ConditionalExpression" ? n.test : n.left, see, n);
+          for (const x of n.type === "ConditionalExpression" ? [n.consequent, n.alternate] : [n.right]) walk(x, visit(true), n);
+          return false;
+        }
+        if (n.type !== "MemberExpression" || !n.computed || rows.has(n)) return;
+        const w = (p?.type === "AssignmentExpression" && p.left === n) || (p?.type === "UpdateExpression" && p.argument === n);
+        const o = n.object;
+        if (target(o) && itemOf(n.property)) hold(target(o), itemOf(n.property));
+        if (o.type === "MemberExpression" && o.computed && target(o.object) && expr(o.property) && expr(n.property)) {
+          rows.add(o);
+          if (!maybe) acc.push({ line, on: target(o.object), rc: [expr(o.property), expr(n.property)], w: !!w });
+        } else if (target(o) && expr(n.property) && !maybe) acc.push({ line, on: target(o), ix: expr(n.property), w: !!w });
+      };
+    for (const c of kids(s)) walk(c, visit(false), s);
+    if (s.type === "ForOfStatement" && s.right.type === "MemberExpression" && s.right.computed && target(s.right.object)) {
+      const left = s.left.type === "VariableDeclaration" ? s.left.declarations[0].id : s.left;
+      const first = left.type === "ArrayPattern" ? left.elements[0] : left;
+      if (first?.type === "Identifier" && s.right.property.type === "Identifier")
+        iters[first.name] = [target(s.right.object), s.right.property.name];
+    }
+    // j = stack.pop(): j is an item of that list
+    const pairs =
+      s.type === "VariableDeclaration"
+        ? s.declarations.map((d) => [d.id, d.init])
+        : s.type === "ExpressionStatement" && s.expression.type === "AssignmentExpression" && s.expression.operator === "="
+          ? [[s.expression.left, s.expression.right]]
+          : [];
+    for (const [id, init] of pairs) if (id.type === "Identifier" && itemOf(init)) popped[id.name] = itemOf(init);
+  }
+  for (const [on, names] of Object.entries(idx)) for (const x of names) if (popped[x]) hold(on, popped[x]);
+  return { acc, iters, holds: Object.fromEntries(Object.entries(holds).map(([k, v]) => [k, [...v].sort()])) };
+}
 
 function analyse(ast, src) {
   const lineOf = lineIndex(src);
@@ -632,14 +788,21 @@ function analyse(ast, src) {
         } else if (target(n.object) && n.property.type === "Identifier") {
           add(idx, target(n.object), n.property.name);
           add(keys, target(n.object), n.property.name);
-        } else if (target(n.object) && n.property.type !== "Literal" && expr(n.property))
-          probes.push({
-            on: target(n.object),
-            line: lineOf(n.start),
-            e: expr(n.property),
-            text: src.slice(n.property.start, n.property.end),
-            kind: "get",
+        } else if (target(n.object) && n.property.type !== "Literal") {
+          if (expr(n.property)) {
+            probes.push({
+              on: target(n.object),
+              line: lineOf(n.start),
+              e: expr(n.property),
+              text: src.slice(n.property.start, n.property.end),
+              kind: "get",
+            });
+          }
+          // nums[(lo + hi) >> 1]: lo and hi are index variables (complex expression)
+          walk(n.property, (x) => {
+            if (x.type === "Identifier") add(idx, target(n.object), x.name);
           });
+        }
       }
       if (n.type === "CallExpression" && n.callee.type === "MemberExpression" && !n.callee.computed && target(n.callee.object)) {
         const on = target(n.callee.object),
@@ -650,6 +813,9 @@ function analyse(ast, src) {
           if (a.type === "Identifier") add(keys, on, a.name);
           else if (m !== "set" && expr(a))
             probes.push({ on, line: lineOf(n.start), e: expr(a), text: src.slice(a.start, a.end), kind: m === "has" ? "in" : "get" });
+        }
+        if (m === "at" && a && expr(a)) {
+          probes.push({ on, line: lineOf(n.start), e: expr(a), text: src.slice(a.start, a.end), kind: "get" });
         }
         if (["slice", "subarray", "substring"].includes(m))
           n.arguments.filter((x) => x.type === "Identifier").forEach((x) => add(idx, on, x.name));
@@ -704,17 +870,35 @@ function analyse(ast, src) {
         if (m.computed && m.object.type !== "MemberExpression" && target(m.object)) inplace.add(target(m.object));
       }
       // a midpoint, mid = Math.floor((lo + hi) / 2) or (lo + hi) >> 1: its ends are pointers too
+      // but not pivot = nums[(lo + hi) >> 1] (subscript expressions are excluded)
       const assigned =
         n.type === "VariableDeclarator"
           ? [n.id, n.init]
           : n.type === "AssignmentExpression" && n.operator === "="
             ? [n.left, n.right]
             : null;
-      if (assigned && assigned[0].type === "Identifier" && assigned[1] && midpoint(assigned[1])) {
+      // (read from the code itself: expr() can't write Math.floor(...), so it can't say)
+      let readsItem = false;
+      if (assigned?.[1])
+        walk(assigned[1], (x) => {
+          if (x.type === "MemberExpression" && !(x.object.type === "Identifier" && x.object.name === "Math")) readsItem = true;
+        });
+      if (assigned && assigned[0].type === "Identifier" && assigned[1] && !readsItem && midpoint(assigned[1])) {
         walk(assigned[1], (x, xp) => {
           if (x.type === "Identifier" && x.name !== "Math" && !(xp?.type === "MemberExpression" && xp.property === x))
             add(derived, assigned[0].name, x.name);
         });
+      }
+      // n = array.length: n is the length of array, so it's an index/pointer (used as upper bound)
+      if (
+        assigned &&
+        assigned[0].type === "Identifier" &&
+        assigned[1]?.type === "MemberExpression" &&
+        !assigned[1].computed &&
+        assigned[1].property.name === "length" &&
+        target(assigned[1].object)
+      ) {
+        add(idx, target(assigned[1].object), assigned[0].name);
       }
       if (n !== fn && scope === "<module>" && FUNCTIONS.has(n.type)) return false; // (the top level's own statements only)
     });
@@ -727,6 +911,7 @@ function analyse(ast, src) {
       probes,
       bits: [...bits].sort(),
       heaps: [],
+      ...links(fn, idx, lineOf),
     };
     usage[scope] = { calls, inplace, swaps };
   }
@@ -934,14 +1119,9 @@ function defaultFor(name, kind) {
   return fits[kind] || (byName.startsWith("[[") && kind === "list") ? byName : KIND_DEFAULT[kind];
 }
 
-/** A first call for code that only defines functions, or a class and calls on it: { driver, guessed: [the inputs that were picked] } */
-export function suggest(code) {
-  let ast;
-  try {
-    ast = parse(code);
-  } catch {
-    return { driver: "", guessed: [] };
-  }
+/** What the code defines to be called: its functions (`plain`, the one an input calls last: the last one nothing calls), and the classes a
+ * design problem's calls are made on: [name, constructor, [[method, function]]] (a class, or LeetCode's X.prototype.m = function). */
+function definitions(ast) {
   const fns = [];
   for (const s of ast.body) {
     if (s.type === "FunctionDeclaration") fns.push([s.id.name, s]);
@@ -966,10 +1146,10 @@ export function suggest(code) {
       (protoMethods[l.object.object.name] ||= []).push([l.property.name, e.right]);
   }
   const plain = fns.filter(([n]) => !protoMethods[n]);
-  if (plain.length) {
-    const [name, f] = plain.filter(([n]) => !called.has(n)).at(-1) || plain.at(-1);
-    const params = f.params.filter((p) => p.type === "Identifier").map((p) => p.name); // (defaults and rest left to the function)
-    return { driver: `${name}(${params.map((p) => defaultFor(p, kindOf(f, p))).join(", ")})`, guessed: params };
+  const entry = plain.filter(([n]) => !called.has(n)).at(-1) || plain.at(-1);
+  if (entry) {
+    plain.splice(plain.indexOf(entry), 1);
+    plain.push(entry);
   }
   const classes = ast.body.filter((s) => s.type === "ClassDeclaration" && !HELPERS[s.id.name]).map((c) => [c.id.name, c]);
   const designs = [
@@ -982,6 +1162,25 @@ export function suggest(code) {
     ]),
     ...Object.entries(protoMethods).map(([n, ms]) => [n, fns.find(([x]) => x === n)?.[1], ms]),
   ];
+  return { plain, designs };
+}
+// a function's parameters an input gives (defaults and rest are left to the function)
+const paramNames = (f) => (f ? f.params.filter((p) => p.type === "Identifier").map((p) => p.name) : []);
+
+/** A first call for code that only defines functions, or a class and calls on it: { driver, guessed: [the inputs that were picked] } */
+export function suggest(code) {
+  let ast;
+  try {
+    ast = parse(code);
+  } catch {
+    return { driver: "", guessed: [] };
+  }
+  const { plain, designs } = definitions(ast);
+  if (plain.length) {
+    const [name, f] = plain.at(-1);
+    const params = paramNames(f);
+    return { driver: `${name}(${params.map((p) => defaultFor(p, kindOf(f, p))).join(", ")})`, guessed: params };
+  }
   if (!designs.length) return { driver: "", guessed: [] };
   const [cls, ctor, methods] = designs.at(-1);
   const args = (f) => (f ? f.params.filter((p) => p.type === "Identifier").map((p) => defaultFor(p.name, kindOf(f, p.name))) : []);
@@ -998,6 +1197,49 @@ export function suggest(code) {
     }
   }
   return { driver: lines.slice(0, 12).join("\n"), guessed: ["operations"] };
+}
+
+/** What LeetCode builds for a parameter from a list (the format tracer.py's node_kind() gives): "linked", "tree", "graph", with [] for
+ * a list of them, or null. From the JSDoc above the function (@param {ListNode} head), else how the function uses it. */
+function nodeKind(src, f, name) {
+  // the /** ... */ right before the function (or before `var name =`, `X.prototype.m =`)
+  const before = src.slice(0, f.start).replace(/[\w$.\s=]*$/, "");
+  const doc = before.endsWith("*/") ? before.slice(before.lastIndexOf("/**")) : "";
+  const hint = new RegExp(`@param\\s*\\{([^}]*)\\}\\s*\\[?${name}\\b`).exec(doc)?.[1].trim() || "";
+  const many = /\[\]\s*$|^Array</.test(hint);
+  const usage = kindOf(f, name);
+  const base = /\bListNode\b/.test(hint)
+    ? "linked"
+    : /\bTreeNode\b/.test(hint)
+      ? "tree"
+      : !hint || /\b_?Node\b/.test(hint)
+        ? ["linked", "tree", "graph"].includes(usage)
+          ? usage
+          : null
+        : null;
+  return base && base + (many ? "[]" : "");
+}
+
+/** What a LeetCode test case is turned into a call with (the format tracer.py's signature() gives): { entries: [{ call, params: [{ name,
+ * kind }] }] (the function an input calls first), classes: { name: { init: [params], methods: { name: [params] } } } }. */
+export function signature(code) {
+  let ast;
+  try {
+    ast = parse(code);
+  } catch (e) {
+    return { entries: [], classes: {}, error: `The code doesn't run: ${syntaxError(e)}` };
+  }
+  const { plain, designs } = definitions(ast);
+  const params = (f) => paramNames(f).map((name) => ({ name, kind: nodeKind(code, f, name) }));
+  return {
+    entries: [...plain].reverse().map(([call, f]) => ({ call, params: params(f) })),
+    classes: Object.fromEntries(
+      designs.map(([cls, ctor, methods]) => [
+        cls,
+        { init: params(ctor), methods: Object.fromEntries(methods.map(([m, f]) => [m, params(f)])) },
+      ]),
+    ),
+  };
 }
 
 /** True when the code runs something by itself (no functions at all, or its top level calls its own), so its top level is traced. */
@@ -1022,6 +1264,7 @@ export function isScript(code) {
 /** The whole run, as the panel gets it (the same fields as tracer.py's run()). An empty input runs a script, or a suggested call. */
 export function run(code, driver = "", mode = "trace") {
   if (mode === "suggest") return suggest(code);
+  if (mode === "signature") return signature(code);
   let script = false,
     guessed = [];
   if (!driver.trim()) {
