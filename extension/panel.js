@@ -19,5 +19,12 @@ const handoff = location.hash.length > 1 ? JSON.parse(decodeURIComponent(locatio
 history.replaceState(null, "", location.pathname);
 if (!receive(pending)) take(handoff && handoff.code, handoff && handoff.input, handoff && handoff.lang);
 
-// the same page in a tab, with the code and input as they are now
-document.getElementById("tab").onclick = () => chrome.tabs.create({ url: `panel.html#${encodeURIComponent(JSON.stringify(now()))}` });
+// the same page in a tab, with the code and input as they are now; the side panel then closes (the tab takes over), a tab stays
+const inTab = !!(await chrome.tabs.getCurrent());
+document.getElementById("tab").onclick = async () => {
+  const tab = await chrome.tabs.create({ url: `panel.html#${encodeURIComponent(JSON.stringify(now()))}` });
+  if (inTab) return;
+  // (sidePanel.close is Chrome 141+; before it, a side panel closes itself with window.close)
+  if (chrome.sidePanel.close) chrome.sidePanel.close({ windowId: tab.windowId }).catch(() => window.close());
+  else window.close();
+};

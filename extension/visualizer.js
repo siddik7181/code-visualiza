@@ -4,10 +4,11 @@
 // program at that step, and every caption is computed from the difference between two steps.
 
 import { calls as testCalls, compare, parseCases } from "./leetcode.js";
+import { buildStory } from "./story.js";
 
 const SPEEDS = [0.5, 1, 2, 4];
 const STEP_MS = 900; // time per step at 1x
-const CELL = 38; // array cell width + gap, px (matches .vz-cell in style.css)
+const CELL = 46; // array cell width + gap, px (matches .vz-cell in style.css)
 const RANGE_PAIRS = [
   ["lo", "hi"],
   ["low", "high"],
@@ -54,7 +55,7 @@ function kill(b) {
   b.worker.terminate();
   if (box === b) box = null;
 }
-function ask(msg) {
+export function ask(msg) {
   const b = worker();
   const id = `${Date.now()}-${Math.random()}`;
   const limit = b.warm ? 20000 : 60000; // the first call also downloads and starts Python (slow on phones)
@@ -117,12 +118,12 @@ const SYNTAX = {
 let SYN = SYNTAX.python;
 /** @param {string} lang "python" or "javascript" */
 export const setLanguage = (lang) => (SYN = SYNTAX[lang] || SYNTAX.python);
-const isRef = (v) => v != null && typeof v === "object" && "r" in v;
-const objOf = (v, heap) => (isRef(v) ? heap[v.r] : null);
+export const isRef = (v) => v != null && typeof v === "object" && "r" in v;
+export const objOf = (v, heap) => (isRef(v) ? heap[v.r] : null);
 // A key of a dict, as shown and as compared with a variable. A JavaScript object's keys are strings (seen[2] is seen["2"]): shown bare,
 // so the key 2 and a variable holding 2 match.
 const keyOf = (k, o, heap) => (SYN.js && o && o.t === "dict" && !o.cls && k !== null && typeof k !== "object" ? String(k) : fmt(k, heap));
-function fmt(v, heap, depth = 0) {
+export function fmt(v, heap, depth = 0) {
   if (v === null || v === undefined) return SYN.none;
   if (v === true) return SYN.yes;
   if (v === false) return SYN.no;
@@ -388,7 +389,7 @@ export function isRefGridInStack(ref, stack, pointers, name = "") {
 }
 
 // The variables of a frame, with `self` (`this`) opened up into self.<attribute> (so a design class shows its own lists and maps).
-function variables(frame, heap) {
+export function variables(frame, heap) {
   const out = [];
   for (const [name, v] of frame.loc) {
     const o = objOf(v, heap);
@@ -400,7 +401,7 @@ function variables(frame, heap) {
 }
 
 // Works out a lookup expression from the tracer (["-", ["n", "target"], ["n", "x"]]) with the frame's current numbers; null if it can't.
-function evaluate(e, ints, frame = null, heap = null) {
+export function evaluate(e, ints, frame = null, heap = null) {
   if (!e) return null;
   if (e[0] === "n") return ints.has(e[1]) ? ints.get(e[1]) : null;
   if (e[0] === "c") return e[1];
@@ -461,108 +462,6 @@ function evaluate(e, ints, frame = null, heap = null) {
   return null;
 }
 
-// ---------------------------------------------------------------- what changed between two steps (the caption)
-// `queues`: the lists the code takes from the front (when one item goes, that's a popleft / shift, not a pop)
-function diff(prevVars, curVars, prevHeap, heap, queues = new Set()) {
-  const before = new Map(prevVars);
-  const msgs = [];
-  for (const [name, v] of curVars) {
-    if (!before.has(name)) {
-      msgs.push(`${name} = ${fmt(v, heap)}`);
-      continue;
-    }
-    const p = before.get(name);
-    if (isRef(p) && isRef(v) && p.r === v.r) {
-      const a = prevHeap[p.r],
-        b = heap[v.r];
-      if (!a || !b) continue;
-      msgs.push(...containerDiff(name, a, b, prevHeap, heap, queues.has(name)));
-    } else if (fmt(p, prevHeap) !== fmt(v, heap)) {
-      msgs.push(primitive(p) && primitive(v) ? `${name}: ${fmt(p, prevHeap)} → ${fmt(v, heap)}` : `${name} = ${fmt(v, heap)}`);
-    }
-  }
-  return msgs;
-}
-function containerDiff(name, a, b, ha, hb, queue = false) {
-  const f = (x, h) => fmt(x, h);
-  if ((a.t === "list" || a.t === "deque" || a.t === "tuple") && a.t === b.t) {
-    const A = a.v.map((x) => f(x, ha)),
-      B = b.v.map((x) => f(x, hb));
-    if (B.length === A.length + 1 && A.every((x, i) => x === B[i])) return [`${name}.${SYN.push}(${B[B.length - 1]})`];
-    if (B.length === A.length + 1 && A.every((x, i) => x === B[i + 1])) return [`${name}.${SYN.unshift}(${B[0]})`];
-    const fromFront = B.length === A.length - 1 && B.every((x, i) => x === A[i + 1]);
-    if (queue && fromFront) return [`${name}.${SYN.shift}() → ${A[0]}`];
-    if (B.length === A.length - 1 && B.every((x, i) => x === A[i])) return [`${name}.pop() → ${A[A.length - 1]}`];
-    if (fromFront) return [`${name}.${SYN.shift}() → ${A[0]}`];
-    if (A.length === B.length) {
-      const ch = A.map((x, i) => (x !== B[i] ? i : -1)).filter((i) => i >= 0);
-      if (ch.length === 2 && A[ch[0]] === B[ch[1]] && A[ch[1]] === B[ch[0]]) return [`swap ${name}[${ch[0]}] ↔ ${name}[${ch[1]}]`];
-      // an item that is itself a list changed in place (a row of a DP table): say which of its items, dp[4][1]: 0 → 1
-      const inner = (i) => {
-        const x = a.v[i],
-          y = b.v[i];
-        return isRef(x) && isRef(y) && x.r === y.r && ha[x.r] && hb[y.r] ? containerDiff(`${name}[${i}]`, ha[x.r], hb[y.r], ha, hb) : [];
-      };
-      if (ch.length && ch.length <= 3)
-        return ch.flatMap((i) => {
-          const sub = inner(i);
-          return sub.length ? sub : [`${name}[${i}]: ${A[i]} → ${B[i]}`];
-        });
-      if (ch.length) return [`${name}: ${ch.length} items changed`];
-      return [];
-    }
-    // one item in or out somewhere else (a heap push/pop reorders the rest): name it by comparing the two lists as multisets
-    const count = (xs) => xs.reduce((m, x) => m.set(x, (m.get(x) || 0) + 1), new Map());
-    const inA = count(A),
-      inB = count(B);
-    const added = [...inB].flatMap(([x, n]) => Array(Math.max(0, n - (inA.get(x) || 0))).fill(x));
-    const removed = [...inA].flatMap(([x, n]) => Array(Math.max(0, n - (inB.get(x) || 0))).fill(x));
-    if (added.length + removed.length && added.length + removed.length <= 2)
-      return [...removed.map((x) => `${name}: ${x} removed`), ...added.map((x) => `${name}: ${x} added`)];
-    return [`${name} now has ${B.length} items`];
-  }
-  if (a.t === "dict" && b.t === "dict") {
-    const A = new Map(a.kv.map(([k, x]) => [keyOf(k, a, ha), f(x, ha)])),
-      B = new Map(b.kv.map(([k, x]) => [keyOf(k, b, hb), f(x, hb)]));
-    const out = [];
-    for (const [k, x] of B) {
-      if (!A.has(k)) out.push(`${name}[${k}] = ${x} (new key)`);
-      else if (A.get(k) !== x) out.push(`${name}[${k}]: ${A.get(k)} → ${x}`);
-    }
-    for (const k of A.keys()) if (!B.has(k)) out.push(`${SYN.del} ${name}[${k}]`);
-    return out.slice(0, 3);
-  }
-  if (a.t === "set" && b.t === "set") {
-    const A = new Set(a.v.map((x) => f(x, ha))),
-      B = new Set(b.v.map((x) => f(x, hb)));
-    return [
-      ...[...B].filter((x) => !A.has(x)).map((x) => `${name}.add(${x})`),
-      ...[...A].filter((x) => !B.has(x)).map((x) => `${name}.${SYN.drop}(${x})`),
-    ].slice(0, 3);
-  }
-  if (a.t === "obj" && b.t === "obj") {
-    const out = [];
-    for (const [k, x] of b.a) {
-      const old = attr(a, k);
-      if (old === undefined || f(old, ha) !== f(x, hb)) out.push(`${name}.${k} = ${f(x, hb)}`);
-    }
-    return out.slice(0, 3);
-  }
-  return [];
-}
-const indent = (line) => (line.match(/^\s*/) || [""])[0].length;
-// For a line that tests something (if/while/for), whether the program went into the block, read from where it went next.
-function branch(code, ranLine, nextLine) {
-  const ran = code[ranLine - 1] || "",
-    next = code[nextLine - 1] || "";
-  const m = /^\s*(?:}\s*else\s+)?(if|elif|while|for)\b/.exec(ran);
-  if (!m || !nextLine || nextLine === ranLine) return ""; // (`if (x) return y`: the next step is on the same line)
-  const inside = indent(next) > indent(ran) && nextLine > ranLine;
-  if (m[1] === "for") return inside ? "next item, go into the loop" : "no items left, the loop ends";
-  if (m[1] === "while") return inside ? "condition true, loop again" : "condition false, the loop ends";
-  return inside ? "condition true" : "condition false";
-}
-
 /** A tested condition (the tracer's `conds[k]` and a step's `cond`) with the values its operands had put in: "a[j] > a[j + 1]" ->
  * "5 > 1". An operand stays as written when its value is long, or when it wasn't worked out (an and / or stopped before it). null when
  * no value would show. */
@@ -583,13 +482,6 @@ export function condValues(c, cond, heap) {
     });
   return shown ? (out + c.t.slice(last)).replace(/\s+/g, " ") : null;
 }
-// what the program does after a test came out true / false
-function outcome(kind, yes) {
-  if (kind === "while" || kind === "for") return yes ? "so the loop body runs" : "so the loop ends";
-  const name = kind === "elif" ? (SYN.js ? "else if" : "elif") : "if";
-  return yes ? `so the ${name} block runs` : `so it skips the ${name} block`;
-}
-
 // ---------------------------------------------------------------- small DOM helpers (views update in place, so changes can animate)
 const el = (tag, cls, text) => {
   const e = document.createElement(tag);
@@ -608,22 +500,27 @@ const fit = (e, text) => {
   e.title = text.length > 6 ? text : "";
 };
 
-// A row of cells: lists, tuples, deques and indexed strings. Index pointers slide under the cells; a lo..hi window dims the rest.
+// A row of cells: lists, tuples, deques and indexed strings. Index pointers slide under the cells.
 class ArrayView {
   constructor() {
     this.el = el("div", "vz-arr");
     this.cells = el("div", "vz-cells");
     this.ptrs = el("div", "vz-ptrs");
-    this.el.append(this.cells, this.ptrs);
+    this.brackets = el("div", "vz-brackets");
+    this.el.append(this.cells, this.ptrs, this.brackets);
     this.ptrEls = new Map();
     this.prev = [];
+    this.ghost = null;
   }
   // bars: draw numbers as bar heights (sorting); `nums` are the numeric values, or null when the list isn't all numbers. `marks`: the cells
-  // the code is comparing (cmp), the two it just swapped (swp), the ones already where they'll be once sorted (done), the ones the line
-  // that ran read (rd) and wrote (wr), the ones written at some point so far (fill), and the ones whose index is in another list (held:
-  // a monotonic stack of indexes).
-  update(items, ptrs, animate, nums = null, bars = false, meta = [], marks = {}) {
+  // the test that ran compared (cmp), the two it just swapped (swp), the ones the line that ran read (rd) and wrote (wr), the ones of a
+  // table the code fills that it hasn't written yet (unfilled), and the ones whose index is in another list (held: a monotonic stack of
+  // indexes). `sorted`: runs [from, to] of items already where they'll be once sorted (a bracket under them). `bad`: an index past the
+  // end the line that failed looked up ({ at, text }): a "?" slot after the last item, with the lookup's expression pointing at it.
+  update(items, ptrs, animate, nums = null, bars = false, meta = [], marks = {}, sorted = [], bad = null) {
     const cells = this.cells;
+    this.ghost?.remove();
+    this.ghost = null;
     this.el.classList.toggle("bars", bars && !!nums);
     while (cells.children.length < items.length) {
       const c = el("div", "vz-cell");
@@ -650,6 +547,7 @@ class ArrayView {
         if (animate && this.prev.length) flash(c);
       }
       for (const m of MARKS) c.classList.toggle(m, !!marks[m]?.has(i));
+      c.title = whyOf(marks, i);
       // add data-var for hover linking if a variable points at this cell
       if (cellVars.has(i)) c.dataset.var = cellVars.get(i).join(" ");
       else delete c.dataset.var;
@@ -668,10 +566,20 @@ class ArrayView {
         c.style.transform = "";
       }
     }
-    // window between a pair of pointers (binary search, two pointers)
-    const at = new Map(ptrs.map((p) => [p.name, p.idx]));
-    const pair = RANGE_PAIRS.find(([a, b]) => at.has(a) && at.has(b));
-    [...cells.children].forEach((c, i) => c.classList.toggle("out", !!pair && (i < at.get(pair[0]) || i > at.get(pair[1]))));
+    if (bad) {
+      this.ghost = el("div", "vz-cell ghost");
+      this.ghost.append(el("span", "vz-v", "?"), el("span", "vz-i", String(bad.at)));
+      cells.append(this.ghost);
+      ptrs = [...ptrs.filter((p) => p.idx < items.length), { name: bad.text, idx: items.length, bad: true }];
+    }
+    this.brackets.replaceChildren(
+      ...sorted.map(([a, b]) => {
+        const e = el("span", "vz-sorted", "sorted ✓");
+        e.style.left = `${a * CELL}px`;
+        e.style.width = `${(b - a + 1) * CELL - 4}px`;
+        return e;
+      }),
+    );
     // pointers: one label per variable, stacked when several share a cell
     const level = new Map();
     const seen = new Set();
@@ -687,7 +595,8 @@ class ArrayView {
       const lv = level.get(p.idx) || 0;
       level.set(p.idx, lv + 1);
       e.style.transform = `translateX(${p.idx * CELL}px) translateY(${lv * 16}px)`;
-      e.classList.toggle("past", p.idx >= items.length);
+      e.classList.toggle("past", p.idx >= items.length && !p.bad);
+      e.classList.toggle("bad", !!p.bad);
       e.classList.toggle("probe", !!p.probe);
       e.classList.toggle("meta", !!p.meta);
       // add data-var for hover linking (skip probes and meta pointers)
@@ -704,19 +613,24 @@ class ArrayView {
     this.prev = items;
   }
 }
-// what the marks on a list's or a grid's cells mean (shown next to its name; seen, front and held are named after the variable)
-const LEGEND = {
-  cmp: "compared",
-  swp: "swapped",
-  done: "in place",
-  rd: "read",
-  wr: "written",
-  fill: "filled",
-  path: "on the stack",
-  slice: "passed to callee",
+// The marks on a list's or a grid's cells. What the line that ran touched (cmp, swp, rd, wr) is the one accent colour; the rest are quiet
+// (dashed, shaded, faded), and a cell's tooltip says what a quiet mark means.
+const MARKS = ["cmp", "swp", "rd", "wr", "unfilled", "held", "path", "seen", "front", "slice"];
+const QUIET = {
+  unfilled: "not written yet",
+  held: "held",
+  path: "where a caller is",
+  seen: "seen",
+  front: "waiting",
+  slice: "passed to the call",
 };
-const MARKS = ["cmp", "swp", "done", "rd", "wr", "fill", "held", "path", "seen", "front", "slice"];
-function swapOf(a, b) {
+// what a cell's quiet marks mean (marks.why names some after the variable: "in stack")
+const whyOf = (marks, k) =>
+  Object.keys(QUIET)
+    .filter((m) => marks[m]?.has(k))
+    .map((m) => marks.why?.[m] || QUIET[m])
+    .join(" · ");
+export function swapOf(a, b) {
   if (a.length !== b.length) return null;
   const ch = a.map((x, i) => (x !== b[i] ? i : -1)).filter((i) => i >= 0);
   return ch.length === 2 && a[ch[0]] === b[ch[1]] && a[ch[1]] === b[ch[0]] ? ch : null;
@@ -772,6 +686,33 @@ export function callArgs(line, fn) {
     }
   }
   return null;
+}
+/** A line with the calls it made put in as their values, in order (`return fib(n - 1) + fib(n - 2)`, with ["1", "?"] ->
+ * `return 1 + ?`): `calls` are the calls made ({ fn }), `vals` their values. null when the line doesn't show those calls one by one. */
+export function fillCalls(line, calls, vals) {
+  let out = "",
+    at = 0;
+  for (const [k, c] of calls.entries()) {
+    const fn = c.fn.split(".").pop().replace(/[$]/g, "\\$");
+    const m = new RegExp(`(?<![\\w.])(?:(?:self|this)\\.)?${fn}\\s*\\(`).exec(line.slice(at));
+    if (!m) return null;
+    const start = at + m.index;
+    let end = -1,
+      depth = 0,
+      quote = null;
+    for (let j = start + m[0].length - 1; j < line.length && end < 0; j++) {
+      const ch = line[j];
+      if (quote) {
+        if (ch === quote && line[j - 1] !== "\\") quote = null;
+      } else if (ch === '"' || ch === "'" || ch === "`") quote = ch;
+      else if ("([{".includes(ch)) depth++;
+      else if (")]}".includes(ch) && --depth === 0) end = j + 1;
+    }
+    if (end < 0) return null;
+    out += line.slice(at, start) + vals[k];
+    at = end;
+  }
+  return out + line.slice(at);
 }
 /** Parses a slice expression. Returns {name, lo, hi} or null. Python: name[lo:hi], JS: name.slice(lo, hi). */
 export function parseSlice(arg, isJs) {
@@ -854,6 +795,7 @@ class GridView {
         e.classList.toggle("cur", !!cur && cur[0] === r && cur[1] === c);
         e.classList.toggle("line", !!cur && (cur[0] === r || cur[1] === c) && !(cur[0] === r && cur[1] === c));
         for (const m of MARKS) e.classList.toggle(m, !!marks[m]?.has(`${r},${c}`));
+        e.title = [text.length > 6 ? text : "", whyOf(marks, `${r},${c}`)].filter(Boolean).join(" · ");
         // add data-var for hover linking if this is the current cell
         if (curVars && cur && cur[0] === r && cur[1] === c) e.dataset.var = curVars.join(" ");
         else delete e.dataset.var;
@@ -1617,10 +1559,6 @@ export function settled(nums) {
 }
 
 // ---------------------------------------------------------------- what one structure says about another
-/** The legend for a picture's marks: [[mark, what it means]], for the marks that mark something; `named` names some (in seen). */
-function legendOf(marks, named = {}) {
-  return MARKS.filter((m) => marks[m]?.size).map((m) => [m, named?.[m] || LEGEND[m] || m]);
-}
 // the lists the code uses as a queue, a stack or a heap (what's waiting to be visited)
 const frontierNames = (info) => new Set([...(info.queues || []), ...(info.stacks || []), ...(info.heaps || [])]);
 /** The items of `name` whose index another list keeps (the tracer's `holds`: temps[stack[-1]]): [that list's name, Set(index)], or null.
@@ -1883,7 +1821,26 @@ class CallTreeView {
       return { n, b, path, cr };
     });
   }
-  update(i, step) {
+  // lights the calls under call `id` (null: none): the ones a piece of the timeline holds
+  light(id) {
+    const under = new Set();
+    const walk = (n) => {
+      under.add(n);
+      n.children.forEach(walk);
+    };
+    const root = this.items.find((x) => x.n.id === id)?.n;
+    if (root) walk(root);
+    for (const { n, b, path } of this.items) {
+      b.classList.toggle("lit", under.has(n));
+      path?.classList.toggle("lit", under.has(n) && n !== root);
+    }
+  }
+  /** The button of call `id`. */
+  nodeOf(id) {
+    return this.items.find((x) => x.n.id === id)?.b || null;
+  }
+  // `pending`: call id -> a waiting caller's line, the values its calls returned so far put in (1 + ?); `failed`: the current call raised
+  update(i, step, pending = new Map(), failed = false) {
     const live = new Set(step.stack.map((f) => f.id)),
       cur = step.stack.length ? step.stack[step.stack.length - 1].id : -1;
     const twins = new Set(this.items.find((x) => x.n.id === cur && x.n.rep)?.n.twins || []);
@@ -1896,9 +1853,12 @@ class CallTreeView {
       b.classList.toggle("live", live.has(n.id));
       b.classList.toggle("cur", n.id === cur);
       b.classList.toggle("done", done);
-      b.classList.toggle("bad", raised);
+      b.classList.toggle("bad", raised || (failed && n.id === cur));
       b.classList.toggle("twin", shown && twins.has(n) && n.id !== cur);
-      cr.textContent = done ? `→ ${clip(n.value, 24)}` : raised ? "raised" : "";
+      const wait = !done && live.has(n.id) ? pending.get(n.id) : null;
+      b.classList.toggle("wait", !!wait);
+      cr.textContent = done ? `→ ${clip(n.value, 24)}` : raised ? "raised" : wait ? clip(wait, 24) : "";
+      cr.title = wait || "";
       path?.classList.toggle("off", !shown);
       path?.classList.toggle("live", live.has(n.id));
       if (n.id === cur) curEl = b;
@@ -2003,7 +1963,10 @@ export function mountApp(host, picker, examples) {
     tracedLang = null,
     suggested = null; // the input that was filled in for the user (replaced when the code changes)
   let result = null; // the trace
-  let i = 0,
+  let story = { frames: [], chapters: [], entry: null }; // the run told line by line (see story.js): its frames are the stops
+  let fk = 0; // the frame shown
+  let recursive = false; // the run calls a function inside itself: its calls are drawn as a tree over the data, which is the current call's
+  let i = 0, // its step
     playing = false,
     speed = 1,
     timer = null,
@@ -2038,78 +2001,147 @@ export function mountApp(host, picker, examples) {
   const runBtn = h("button.primary.vz-run", { textContent: "Run", title: "Run (Ctrl+Enter)", onclick: () => run() });
   // shown when the code was edited since the run that's shown (its lines no longer match)
   const editedTag = h("span.vz-edited", { textContent: "edited · Ctrl+Enter runs it", hidden: true });
-  // what the marks on the code mean, while they're the run's
-  const codeKey = h(
-    "span.vz-codekey",
-    { hidden: true },
-    h("i.ran", { textContent: "just ran" }),
-    h("i.cur", { textContent: "runs next" }),
-    h("i.hits", { textContent: "×3: times it ran" }),
-  );
   const note = h("p.vz-note");
   const caseBar = h("div.vz-cases", { role: "group", ariaLabel: "Test case", hidden: true });
   // The code is always editable: the editor lies over the source column of the traced lines (codeBox), which show under it what the run
-  // does (the line about to run, the one that ran, how many times each ran). Both scroll together in codeWrap; the gutter (line numbers)
-  // takes clicks: the next time that line runs.
+  // does (the line that just ran; for an error, the line that failed and the one that set it up). Both scroll together in codeWrap; the
+  // gutter (line numbers) takes clicks: the next time that line runs.
   const codeBox = h("div.vz-code");
   const codeWrap = h("div.vz-codewrap", {}, codeBox, editor);
   const caption = h("div.vz-caption");
   const stage = h("div.vz-stage");
+  // the current call's variables, a quiet line at the foot of the column (a caller's stay on its card)
+  const varBar = h("div.vz-varbar", { ariaLabel: "Variables" });
   const outBox = h("div.vz-out");
   const status = h("p.vz-status");
   const counter = h("span.vz-count");
-  const slider = h("input.vz-slider", {
-    type: "range",
-    min: 0,
-    max: 0,
-    value: 0,
-    ariaLabel: "Step",
-    oninput: () => go(+slider.value, false),
-  });
+  // the run as a bar cut into its chapters (the passes of the outer loop; an error is a red piece at the end): a click or a drag goes there
+  const timeline = h("div.vz-time", { role: "slider", ariaLabel: "Where in the run", ariaValueMin: "1" });
+  const seek = (e) => {
+    const r = timeline.getBoundingClientRect();
+    if (r.width) goFrame(Math.floor(((e.clientX - r.left) / r.width) * story.frames.length));
+  };
+  timeline.onpointerdown = (e) => {
+    timeline.setPointerCapture(e.pointerId);
+    seek(e);
+  };
+  timeline.onpointermove = (e) => timeline.hasPointerCapture(e.pointerId) && seek(e);
+  new ResizeObserver(() => labelChapters()).observe(timeline);
   const btn = (label, title, fn) => h("button.vz-btn", { textContent: label, title, ariaLabel: title, onclick: fn });
   const playBtn = btn("▶", "Play / pause (space)", () => toggle());
-  const speedBtn = btn("1×", "Speed", () => {
+  // the moves with keys of their own, in a menu
+  const item = (label, keys, fn) =>
+    h("button.vz-mi", { role: "menuitem", onclick: fn }, h("span", { textContent: label }), h("kbd", { textContent: keys }));
+  const speedItem = item("Speed", "1×", () => {
     speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
-    speedBtn.textContent = `${speed}×`;
+    speedItem.lastChild.textContent = `${speed}×`;
     host.style.setProperty("--vz-dur", `${Math.round(320 / speed)}ms`);
     if (playing) schedule();
   });
-  // the pictures: the data (frames and their structures), the call tree, the code's statement tree. The call tree shows the data under it.
+  const menuDo = (fn) => () => {
+    closeMenu();
+    fn();
+  };
+  const menu = h(
+    "div.vz-menu",
+    { role: "menu", hidden: true },
+    item(
+      "First step",
+      "Home",
+      menuDo(() => goFrame(0)),
+    ),
+    item(
+      "Last step",
+      "End",
+      menuDo(() => goFrame(story.frames.length - 1)),
+    ),
+    item(
+      "Step over the calls",
+      "⇧→",
+      menuDo(() => jump("over")),
+    ),
+    item(
+      "Back over the calls",
+      "⇧←",
+      menuDo(() => jump("back")),
+    ),
+    item(
+      "Step out of this call",
+      "⇧↑",
+      menuDo(() => jump("out")),
+    ),
+    item(
+      "Next loop pass",
+      "⇧↓",
+      menuDo(() => jump("pass")),
+    ),
+    speedItem,
+  );
+  const menuBtn = btn("⋯", "More: jumps and speed", () => (menu.hidden ? openMenu() : closeMenu()));
+  menuBtn.ariaHasPopup = "menu";
+  function openMenu() {
+    menu.hidden = false;
+    menuBtn.ariaExpanded = "true";
+    menu.querySelector("button")?.focus();
+  }
+  function closeMenu() {
+    menu.hidden = true;
+    menuBtn.ariaExpanded = "false";
+  }
+  document.addEventListener(
+    "pointerdown",
+    (e) => !menu.hidden && !menu.parentElement?.contains(/** @type {Node} */ (e.target)) && closeMenu(),
+  );
+  // the pictures: the data (the current call's structures; above them, when the code recurses, the tree of its calls, the way down to the
+  // current one lit), and the code's statement tree
   const calls = new CallTreeView((n) => go(n));
   const codeTree = new CodeTreeView((line) => jumpToLine(line));
   const callSum = h("p.vz-csum");
-  const panes = { data: stage, calls: h("div.vz-pane", {}, callSum, calls.el), outline: h("div.vz-pane", {}, codeTree.el) };
-  const TABS = { data: "Data", calls: "Call tree", outline: "Code tree" };
+  const treePane = h("div.vz-pane.vz-calls", {}, callSum, calls.el);
+  const panes = { data: stage, outline: h("div.vz-pane", {}, codeTree.el) };
+  const TABS = { data: "Data", outline: "Code tree" };
   const tabBtns = Object.entries(TABS).map(([k, label]) => h("button.vz-tab", { textContent: label, onclick: () => show(k) }));
   const controls = h(
     "div.vz-controls",
     {},
-    btn("⏮", "First step (Home)", () => go(0)),
-    btn("◀", "Back (←)", () => go(i - 1)),
+    btn("❘◀", "Back (←)", () => goFrame(fk - 1)),
     playBtn,
-    btn("▶❘", "Next (→)", () => go(i + 1)),
-    btn("⏭", "Last step (End)", () => go(steps().length - 1)),
-    h(
-      "span.vz-jumps",
-      {},
-      btn("↷", "Step over: skip the calls this line makes (Shift+→; Shift+← steps back over)", () => jump(stepOver)),
-      btn("⤴", "Step out: to the return of this call (Shift+↑)", () => jump(stepOut)),
-      btn("⟳", "Next loop pass (Shift+↓)", () => jump(nextPass)),
-    ),
-    slider,
+    btn("▶❘", "Next (→)", () => goFrame(fk + 1)),
+    timeline,
     counter,
-    speedBtn,
+    h("span.vz-more", {}, menuBtn, menu),
   );
   const right = h(
     "section.vz-right",
     { ariaLabel: "What the program does" },
-    caption,
     h("div.vz-tabs", { role: "group", ariaLabel: "Picture" }, tabBtns),
-    panes.calls,
+    caption,
+    treePane,
     panes.outline,
     stage,
     outBox,
+    varBar,
   );
+  // hovering (or focusing) a variable lights everywhere it's drawn in its call: its chip, pointers, the cells they point at
+  const linkScope = (t) => {
+    const fr = t.closest(".vz-frame");
+    if (fr && !fr.classList.contains("top")) return [fr];
+    return [stage.querySelector(".vz-frame.top"), varBar].filter(Boolean);
+  };
+  const linkOn = (e) => {
+    const t = e.target.closest?.("[data-var]");
+    if (!t || !(stage.contains(t) || varBar.contains(t))) return;
+    const vars = t.dataset.var.split(" ");
+    for (const root of linkScope(t))
+      root
+        .querySelectorAll("[data-var]")
+        .forEach((el) => el.dataset.var.split(" ").some((v) => vars.includes(v)) && el.classList.add("link"));
+  };
+  const linkOff = (e) => e.target.closest?.("[data-var]") && right.querySelectorAll(".link").forEach((el) => el.classList.remove("link"));
+  right.addEventListener("mouseover", linkOn);
+  right.addEventListener("focusin", linkOn);
+  right.addEventListener("mouseout", linkOff);
+  right.addEventListener("focusout", linkOff);
   host.append(
     h(
       "div.vz-body",
@@ -2117,7 +2149,7 @@ export function mountApp(host, picker, examples) {
       h(
         "section.vz-left",
         { ariaLabel: "Code and input" },
-        h("div.vz-head", {}, langPick, codeKey, editedTag),
+        h("div.vz-head", {}, langPick, editedTag),
         codeWrap,
         h("div.vz-head", {}, h("b", { textContent: "Input" })),
         h("div.vz-inrow", {}, input, runBtn),
@@ -2132,43 +2164,71 @@ export function mountApp(host, picker, examples) {
 
   const steps = () => (result ? result.steps : []);
   const currentStep = () => steps()[i];
-  // a bigger move: step over, back over, step out, next loop pass
-  const jump = (to) => steps().length && go(to(steps(), i, result.outline));
+  // A bigger move, over the frames: step over (the next line of this call or its caller: the calls the line makes are skipped), back
+  // over, step out (this call's return), the next pass of the loop around the line that ran.
+  function jump(kind) {
+    const fs = story.frames,
+      cur = fs[fk];
+    if (!cur) return;
+    const all = steps();
+    const depth = (f) => all[f.i].stack.length,
+      id = (f) => frameAt(all, f.i);
+    const d = depth(cur),
+      me = id(cur);
+    const loop = kind === "pass" && cur.line ? loopAround(result.outline, cur.line) : null;
+    const out = (f) => depth(f) < d || (id(f) === me && (f.line < loop.l || f.line > loop.e));
+    const to = {
+      over: (f) => depth(f) <= d,
+      back: (f) => depth(f) <= d,
+      out: (f) => (f.kind === "return" && id(f) === me) || depth(f) < d,
+      pass: (f) => (id(f) === me && f.line === headerOf(loop) && (f.loopPass !== undefined || f.loopEnds)) || out(f),
+    }[kind === "pass" && !loop ? "over" : kind];
+    const k = kind === "back" ? fs.findLastIndex((f, n) => n < fk && to(f)) : fs.findIndex((f, n) => n > fk && to(f));
+    goFrame(k >= 0 ? k : kind === "back" ? 0 : fs.length - 1);
+  }
   function onKey(e) {
-    // typing goes to the text boxes; a focused slider or button already handles its own keys
+    if (e.key === "Escape" && !menu.hidden) {
+      closeMenu();
+      menuBtn.focus();
+      return;
+    }
+    // typing goes to the text boxes; a focused button already handles its own keys
     if (e.target.matches("textarea, input, select") || (e.key === " " && e.target.matches("button")) || e.ctrlKey || e.metaKey || e.altKey)
       return;
-    if (e.key === "ArrowRight" && e.shiftKey) jump(stepOver);
-    else if (e.key === "ArrowLeft" && e.shiftKey) jump(backOver);
-    else if (e.key === "ArrowUp" && e.shiftKey) jump(stepOut);
-    else if (e.key === "ArrowDown" && e.shiftKey) jump(nextPass);
-    else if (e.key === "ArrowRight") go(i + 1);
-    else if (e.key === "ArrowLeft") go(i - 1);
-    else if (e.key === "Home") go(0);
-    else if (e.key === "End") go(steps().length - 1);
+    if (e.key === "ArrowRight" && e.shiftKey) jump("over");
+    else if (e.key === "ArrowLeft" && e.shiftKey) jump("back");
+    else if (e.key === "ArrowUp" && e.shiftKey) jump("out");
+    else if (e.key === "ArrowDown" && e.shiftKey) jump("pass");
+    else if (e.key === "ArrowRight") goFrame(fk + 1);
+    else if (e.key === "ArrowLeft") goFrame(fk - 1);
+    else if (e.key === "Home") goFrame(0);
+    else if (e.key === "End") goFrame(story.frames.length - 1);
     else if (e.key === " ") toggle();
     else return;
     e.preventDefault();
   }
   function show(k) {
     tab = k;
-    for (const [name, pane] of Object.entries(panes)) pane.hidden = name !== k && !(name === "data" && k === "calls");
-    right.classList.toggle("split", k === "calls");
+    for (const [name, pane] of Object.entries(panes)) pane.hidden = name !== k;
+    treePane.hidden = !(k === "data" && recursive);
+    right.classList.toggle("split", !treePane.hidden);
+    varBar.hidden = k !== "data";
     tabBtns.forEach((b, n) => (b.ariaPressed = String(Object.keys(TABS)[n] === k)));
-    if (steps().length) draw(false);
+    if (story.frames.length) draw(false);
   }
   // The run shown is of other code once the code is edited: it goes, until the next Run.
   function clearRun() {
     stop();
     result = picked = null;
     effects = [];
+    story = { frames: [], chapters: [], entry: null };
+    fk = 0;
     frameEls.clear();
-    legendHistory.clear();
-    for (const box of [stage, caption, outBox, calls.el, codeTree.el, caseBar]) box.replaceChildren();
+    for (const box of [stage, varBar, caption, outBox, calls.el, codeTree.el, caseBar]) box.replaceChildren();
     caption.append(h("span.vz-hint", { textContent: "The code changed: press Run (Ctrl+Enter) to trace it." }));
     callSum.textContent = note.textContent = "";
     caseBar.hidden = true;
-    slider.max = slider.value = "0";
+    timeline.replaceChildren();
     counter.textContent = "";
   }
   // The lines under the editor, for the code in it. Their marks are the run's only while the code is the code that ran.
@@ -2184,7 +2244,6 @@ export function mountApp(host, picker, examples) {
               "div.vz-line",
               { onclick: () => jumpToLine(n + 1) },
               h("span.vz-ln", { textContent: String(n + 1), title: "Go to the next time this line runs" }),
-              h("span.vz-hits"),
               h("span.vz-src", { textContent: line || " " }),
             ),
           ),
@@ -2194,7 +2253,6 @@ export function mountApp(host, picker, examples) {
     fitEditor();
     const fresh = text === tracedCode && steps().length > 0;
     editedTag.hidden = tracedCode === null || text === tracedCode;
-    codeKey.hidden = !fresh;
     codeWrap.classList.toggle("stale", !fresh);
     return fresh;
   }
@@ -2207,11 +2265,11 @@ export function mountApp(host, picker, examples) {
     editor.style.width = `${Math.max(editor.scrollWidth, codeWrap.clientWidth - (gutter || 0))}px`;
   }
   function jumpToLine(line) {
-    const all = steps();
-    const at = (k) => all[k].ev === "line" && all[k].line === line;
-    let k = all.findIndex((_, n) => n > i && at(n));
-    if (k < 0) k = all.findIndex((_, n) => at(n)); // (wraps around to the first time)
-    if (k >= 0) go(k);
+    const fs = story.frames;
+    const at = (f) => f.line === line && f.kind !== "call";
+    let k = fs.findIndex((f, n) => n > fk && at(f));
+    if (k < 0) k = fs.findIndex(at); // (wraps around to the first time)
+    if (k >= 0) goFrame(k);
   }
   function load(ex) {
     caseAt = 0;
@@ -2230,15 +2288,15 @@ export function mountApp(host, picker, examples) {
   function schedule() {
     clearTimeout(timer);
     timer = setTimeout(() => {
-      if (i >= steps().length - 1) return stop();
-      go(i + 1);
+      if (fk >= story.frames.length - 1) return stop();
+      goFrame(fk + 1, false);
       schedule();
     }, STEP_MS / speed);
   }
   function toggle() {
-    if (!steps().length) return;
+    if (!story.frames.length) return;
     if (playing) return stop();
-    if (i >= steps().length - 1) go(0);
+    if (fk >= story.frames.length - 1) goFrame(0);
     playing = true;
     playBtn.textContent = "⏸";
     schedule();
@@ -2246,56 +2304,74 @@ export function mountApp(host, picker, examples) {
 
   // views live as long as their frame and variable, so a change animates instead of redrawing
   const frameEls = new Map(); // frame id -> { el, vars, views: Map(name -> { kind, view, wrap }) }
-  const barsPref = new Map(); // "function:variable" -> draw that number list as bars
   const framePref = new Map(); // frame id -> open or not, once its header was clicked
-  const legendHistory = new Map(); // "frame:name" -> Set(marks ever shown)
   let lastTop = null; // the current call when last drawn
   let callOf = new Map(); // frame id -> its call in the call tree
   let sorts = new Set(); // lists whose items a test compares with each other (sorting code)
   let effects = []; // step -> what the line that ran before it read and wrote (lineEffects)
-  function go(n, fromUser = true) {
-    const all = steps();
-    if (!all.length) return;
-    n = Math.max(0, Math.min(all.length - 1, n));
-    const animate = Math.abs(n - i) === 1 || n === i;
-    if (fromUser && playing && n !== i + 1) stop();
-    i = n;
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  // to frame k (one forward or back animates)
+  function goFrame(k, fromUser = true) {
+    const fs = story.frames;
+    if (!fs.length) return;
+    k = Math.max(0, Math.min(fs.length - 1, k));
+    const animate = Math.abs(k - fk) === 1 || k === fk;
+    const forward = k === fk + 1;
+    if (fromUser && playing && !forward) stop();
+    fk = k;
+    i = fs[k].i;
     draw(animate);
+    if (forward && !reduced.matches) fly();
+  }
+  // to step n (a call in the call tree): its frame, else the next one after it (or before it, going back)
+  function go(n) {
+    const fs = story.frames;
+    let k = fs.findIndex((f) => f.i === n);
+    if (k < 0) k = n > i ? fs.findIndex((f) => f.i > n) : fs.findLastIndex((f) => f.i < n);
+    goFrame(k >= 0 ? k : n > i ? fs.length - 1 : 0);
   }
 
   function draw(animate) {
     const all = steps(),
+      fs = story.frames,
+      f = fs[fk],
       s = all[i],
-      prev = all[i - 1];
-    slider.max = String(all.length - 1);
-    slider.value = String(i);
-    counter.textContent = `${i + 1} / ${all.length}`;
-    // code: the line about to run, the line that just ran, and how many times each line has run so far (also in the code tree)
-    const ran = prev && prev.stack.length ? prev.line : 0;
-    const counts = new Map();
-    for (let k = 0; k <= i; k++) if (all[k].ev === "line") counts.set(all[k].line, (counts.get(all[k].line) || 0) + 1);
+      prev = fk > 0 ? all[fs[fk - 1].i] : undefined;
+    counter.textContent = `${fk + 1} / ${fs.length}`;
+    timeline.ariaValueMax = String(fs.length);
+    timeline.ariaValueNow = String(fk + 1);
+    markTimeline();
+    // code: the line that just ran; for an error, the line that failed (red) and the line that set it up (tagged)
     const fresh = syncRows(); // (code edited since the run: its lines don't match, so they're not marked)
-    [...codeBox.children].forEach((line, n) => {
-      line.classList.toggle("cur", fresh && n + 1 === s.line);
-      line.classList.toggle("ran", fresh && n + 1 === ran && ran !== s.line);
-      line.classList.toggle("bad", fresh && n + 1 === s.line && s.ev === "exception");
-      const hits = fresh && counts.has(n + 1) ? `×${counts.get(n + 1)}` : "";
-      if (line.children[1].textContent !== hits) line.children[1].textContent = hits;
+    const err = f.kind === "error",
+      cause = err ? f.cause : null;
+    [...codeBox.children].forEach((row, n) => {
+      row.classList.toggle("cur", fresh && !err && n + 1 === f.line);
+      row.classList.toggle("bad", fresh && err && n + 1 === f.line);
+      const why = fresh && cause && n + 1 === cause.line ? `← ${cause.name} became ${cause.value} here` : "";
+      let tag = row.querySelector(".vz-tag");
+      if (why && !tag) row.append((tag = h("span.vz-tag")));
+      if (tag && why) tag.textContent = why;
+      else tag?.remove();
     });
-    const curLine = fresh && codeBox.children[s.line - 1];
+    const curLine = fresh && f.line && codeBox.children[f.line - 1];
     if (curLine && document.activeElement !== editor) {
       const top = curLine.offsetTop, // (.vz-code is at the top of the box, so this is measured from the box's top)
         bottom = top + curLine.offsetHeight;
       if (top < codeWrap.scrollTop || bottom > codeWrap.scrollTop + codeWrap.clientHeight)
         codeWrap.scrollTop = top - codeWrap.clientHeight / 2;
     }
-    caption.replaceChildren(...captionFor(s, prev));
+    caption.replaceChildren(...captionFor(f, s));
     drawStack(s, prev, animate);
-    if (tab === "calls") calls.update(i, s);
-    else if (tab === "outline") codeTree.update(s.line, counts);
+    if (tab === "data" && recursive) calls.update(i, s, pendingAll(s), err);
+    else if (tab === "outline") {
+      const counts = new Map();
+      for (const g of fs.slice(0, fk + 1)) if (g.line && g.kind !== "call") counts.set(g.line, (counts.get(g.line) || 0) + 1);
+      codeTree.update(f.line || s.line, counts);
+    }
     // output and the final result
     const out = [...all.slice(0, i + 1)].reverse().find((x) => x.out)?.out;
-    const last = i === all.length - 1;
+    const last = fk === fs.length - 1;
     outBox.replaceChildren(
       ...(out ? [h("div.vz-label", { textContent: "Printed" }), h("pre.vz-print", { textContent: out })] : []),
       ...(last && result.result
@@ -2306,6 +2382,175 @@ export function mountApp(host, picker, examples) {
         ? [h("div.vz-error", { textContent: "Stopped after 1,500 steps. Try a smaller input to see the whole run." })]
         : []),
     );
+  }
+
+  // The timeline: one piece per chapter, as long as its frames. A piece's label shortens to its number when it's narrow.
+  function buildTimeline() {
+    const all = steps();
+    timeline.replaceChildren(
+      ...story.chapters.map((c) => {
+        const seg = h(`span.vz-seg${c.error ? ".error" : ""}`, { title: c.hint ? `${c.label} · ${c.hint}` : c.label });
+        seg.style.flexGrow = String(c.end - c.at);
+        seg.append(h("i"), h("span"));
+        // a call's piece: hovering it lights its calls in the tree
+        const id = c.label.startsWith("Call") ? frameAt(all, story.frames[c.at].i) : null;
+        if (id !== null) {
+          seg.onpointerenter = () => calls.light(id);
+          seg.onpointerleave = () => calls.light(null);
+        }
+        return seg;
+      }),
+    );
+    labelChapters();
+  }
+  function labelChapters() {
+    story.chapters.forEach((c, k) => {
+      const seg = /** @type {HTMLElement} */ (timeline.children[k]);
+      if (!seg) return;
+      const w = seg.clientWidth;
+      const call = c.label.startsWith("Call") && c.hint;
+      const full = call ? c.hint : c.label;
+      const short = c.label.match(/\d+$/)?.[0] || (c.error ? "!" : "");
+      seg.lastChild.textContent = w >= full.length * 6.5 + 12 ? full : w >= 18 ? short : "";
+    });
+  }
+  function markTimeline() {
+    story.chapters.forEach((c, k) => {
+      const seg = timeline.children[k];
+      if (!seg) return;
+      const done = fk >= c.end ? 1 : fk < c.at ? 0 : (fk - c.at + 1) / (c.end - c.at);
+      seg.classList.toggle("on", fk >= c.at && fk < c.end);
+      /** @type {HTMLElement} */ (seg.firstChild).style.width = `${done * 100}%`;
+    });
+  }
+
+  // A value the line that ran copied flies from where it was read to where it went (a cell, a variable); a call's result flies up the
+  // tree to its caller.
+  function fly() {
+    const f = story.frames[fk],
+      s = currentStep();
+    const send = (from, to, text) => {
+      const a = from?.getBoundingClientRect(),
+        b = to?.getBoundingClientRect();
+      if (!a?.width || !b?.width || !text) return;
+      const e = h("span.vz-fly", { textContent: text });
+      e.style.left = `${a.left + a.width / 2}px`;
+      e.style.top = `${a.top + a.height / 2}px`;
+      document.body.append(e);
+      const dx = b.left + b.width / 2 - (a.left + a.width / 2),
+        dy = b.top + b.height / 2 - (a.top + a.height / 2);
+      const run = e.animate(
+        [{ transform: "translate(-50%, -50%)" }, { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`, opacity: 0.6 }],
+        { duration: 560 / speed, easing: "cubic-bezier(0.3, 0.7, 0.3, 1)" },
+      );
+      run.onfinish = run.oncancel = () => e.remove();
+    };
+    if (f.kind === "return" && recursive && s.stack.length > 1) {
+      send(calls.nodeOf(s.stack.at(-1).id), calls.nodeOf(s.stack.at(-2).id), clip(fmt(s.ret, s.heap), 12));
+      return;
+    }
+    const e = effects[i];
+    const fe = frameEls.get(frameAt(steps(), i));
+    if (!e || e.test || !fe) return;
+    const reads = e.list.filter((x) => !x.w && x.at !== null && x.val !== null);
+    if (!reads.length) return;
+    const cellOf = (ref, at) => {
+      const item = [...fe.views.values()].find((x) => x.ref === ref && x.view);
+      if (item?.kind === "grid") {
+        const [r, c] = String(at).split(",").map(Number);
+        return item.view.cells?.[r]?.[c] || null;
+      }
+      return item?.kind === "array" ? item.view.cells.children[at] || null : null;
+    };
+    const cellText = (c) => (c.classList.contains("vz-cell") ? c.firstChild.textContent : c.textContent);
+    const targets = [
+      ...e.list.filter((x) => x.w && x.at !== null).map((x) => ({ to: cellOf(x.ref, x.at), w: x })),
+      ...[...fe.chips.values()].filter((c) => c.classList.contains("wr")).map((c) => ({ to: c, w: null })),
+    ];
+    for (const { to, w } of targets) {
+      if (!to || to.classList.contains("swp")) continue; // (a swap shows as the two moving)
+      const text = w ? cellText(to) : to.lastChild.textContent;
+      const src = reads.find((r) => r.val === text && !(w && r.ref === w.ref && r.at === w.at));
+      if (src) send(cellOf(src.ref, src.at), to, text);
+    }
+  }
+
+  // a sentence (see story.js) as nodes: code, values (accent) and errors (red)
+  const say = (parts) =>
+    parts.map((p) =>
+      typeof p === "string"
+        ? p
+        : p.code !== undefined
+          ? h("code", { textContent: p.code })
+          : p.val !== undefined
+            ? h("b.vz-val", { textContent: p.val })
+            : h("b.vz-err", { textContent: p.err }),
+    );
+  // the caption: where the run is (the loop's pass, or the calls down to this one), what the line did, and for an error, why
+  function captionFor(f, s) {
+    const details = [f.detail, f.detail2, recursive && waitNote(f, s), ...(f.kind === "call" ? repeatNote(i).map((t) => [t]) : [])];
+    return [
+      h("div.vz-where", {}, whereOf(f, s)),
+      h("div.vz-say", {}, say(f.sentence)),
+      ...details.filter(Boolean).map((d) => h("div.vz-detail", {}, say(d))),
+    ];
+  }
+  const callLabel = (g) => callOf.get(g.id)?.label || `${fnName(g.fn)}()`;
+  function whereOf(f, s) {
+    const calls = s.stack.filter((g) => g.fn !== "<module>");
+    // recursion: the calls down to this one (the tree's lit path)
+    if (recursive && calls.length) {
+      const path = calls.length > 4 ? [calls[0], null, ...calls.slice(-2)] : calls;
+      return path.flatMap((g, k) => [k ? " › " : "", g ? h("span", { textContent: callLabel(g) }) : "…"]);
+    }
+    const c = story.chapters.find((x) => fk >= x.at && fk < x.end);
+    if (!c) return [];
+    const kind = c.label.replace(/ \d+$/, "");
+    const of = /\d$/.test(c.label) ? ` of ${story.chapters.filter((x) => x.label.startsWith(`${kind} `)).length}` : "";
+    const top = s.stack[s.stack.length - 1];
+    const inside = top && story.entry && top.id !== story.entry.id && top.fn !== "<module>" ? ` · inside ${callLabel(top)}` : "";
+    return [`${c.label}${of}${c.hint ? ` · ${c.hint}` : ""}${inside}`];
+  }
+
+  // A caller waiting on the calls its line makes, its line with the values they returned so far put in, and "?" for the one running
+  // (return fib(n - 1) + fib(n - 2) → return 1 + ?). null when that can't be told from the line.
+  function pendingOf(g) {
+    const all = steps();
+    let k = i;
+    while (k >= 0 && !(all[k].ev === "line" && frameAt(all, k) === g.id)) k--;
+    const node = callOf.get(g.id);
+    if (!node || k < 0) return null;
+    const live = new Set(all[i].stack.map((x) => x.id));
+    const kids = node.children.filter((c) => c.call > k && c.call <= i);
+    const vals = kids.map((c) => (c.ret >= 0 && c.ret <= i ? c.value : live.has(c.id) ? "?" : null));
+    return vals.length && !vals.includes(null) ? fillCalls((code[g.line - 1] || "").trim(), kids, vals) : null;
+  }
+  // every waiting caller's line (call id -> text), for the tree
+  function pendingAll(s) {
+    const out = new Map();
+    for (const g of s.stack.slice(0, -1)) {
+      const p = pendingOf(g);
+      if (p) out.set(g.id, p.replace(/^return\s+/, "").replace(/;$/, ""));
+    }
+    return out;
+  }
+  // a call or a return: what the caller's line is now
+  function waitNote(f, s) {
+    const g = s.stack[s.stack.length - 2];
+    if (!g || g.fn === "<module>" || (f.kind !== "call" && f.kind !== "return")) return null;
+    const p = pendingOf(g);
+    if (!p) return null;
+    const who = { code: callLabel(g) };
+    return f.kind === "call" ? [who, " waits for it: ", { code: p }] : [who, " gets ", { val: fmt(s.ret, s.heap) }, ": ", { code: p }];
+  }
+  // a call made before with the same arguments (recursion without a memo): what it returned then
+  function repeatNote(n) {
+    const node = callOf.get(frameAt(steps(), n));
+    if (!node || !(node.rep > 1)) return [];
+    const first = node.twins[0];
+    return first.ret >= 0 && first.ret < n
+      ? [`Called before with these arguments: it returned ${first.value} then (a memo / cache could reuse that)`]
+      : ["Called before with these arguments, and that call hasn't returned yet"];
   }
 
   // The test on the line that just ran in step n's call (an if / elif / while, or a JavaScript for): the step that was about to run it
@@ -2320,131 +2565,6 @@ export function mountApp(host, picker, examples) {
       }
     return null;
   }
-  // a test as code with its values put in ("nums[mid] < target → 3 < 5"), then once it ran, true / false and what that makes the code do
-  function testNodes(t, ran, values = true) {
-    const vals = values && condValues(t.c, t.cond, steps()[t.k].heap);
-    const out = [h("code.vz-cond", { textContent: t.c.t.replace(/\s+/g, " ") })];
-    if (vals) out.push(ran ? " → " : ", that is ", h("code.vz-cond", { textContent: vals }));
-    if (ran)
-      out.push(
-        " → ",
-        h(`b.vz-tf.${t.cond.v ? "yes" : "no"}`, { textContent: t.cond.v ? SYN.yes : SYN.no }),
-        `, ${outcome(t.c.kind, t.cond.v)}`,
-      );
-    return out;
-  }
-  // The items the line that ran before step n read, with their values then ("dp[4] = 2, coins[1] = 2"): not the items it also wrote (their
-  // old value is in the caption already), nor a test's (shown as the test). null when there are none.
-  const sourcesOf = (n) => readsText(effects[n]);
-  // (readsText(accessesAt(step)) is what the line about to run at that step will read)
-  function readsText(e) {
-    if (!e || e.test) return null;
-    const wrote = new Set(e.list.filter((x) => x.w).map((x) => x.text));
-    const from = e.list.filter((x) => !x.w && !wrote.has(x.text) && x.val !== null);
-    return from.length
-      ? from
-          .slice(0, 3)
-          .map((x) => `${x.text} = ${clip(x.val, 20)}`)
-          .join(", ")
-      : null;
-  }
-  // a call made before with the same arguments (recursion without a memo): what it returned then
-  function repeatNote(n) {
-    const node = callOf.get(frameAt(steps(), n));
-    if (!node || !(node.rep > 1)) return [];
-    const first = node.twins[0];
-    return first.ret >= 0 && first.ret < n
-      ? [`called before with these arguments: it returned ${first.value} then (a memo / cache could reuse that)`]
-      : ["called before with these arguments, and that call hasn't returned yet"];
-  }
-
-  function captionFor(s, prev) {
-    const all = steps();
-    const top = s.stack[s.stack.length - 1];
-    const parts = [];
-    const script = top.fn === "<module>";
-    const args = top.loc.filter(([k]) => k !== "self" && (s.params || []).includes(k)); // (a closure's outer variables aren't arguments)
-    const test = testBefore(i);
-    let testFirst = true;
-    if (s.ev === "call") {
-      parts.push(script ? "The program starts" : `${top.fn}(${args.map(([k, v]) => `${k}=${fmt(v, s.heap)}`).join(", ")})`);
-      parts.push(...repeatNote(i));
-    } else if (s.ev === "return") {
-      parts.push(script ? "The program ends" : `${top.fn} returns ${fmt(s.ret, s.heap)}`);
-      if (sourcesOf(i)) parts.push(`from ${sourcesOf(i)}`);
-    } else if (s.ev === "exception") parts.push(s.exc);
-    else if (prev) {
-      const ptop = prev.stack[prev.stack.length - 1];
-      if (prev.ev === "return" && ptop.id !== top.id) {
-        parts.push(`Back in ${fnName(top.fn)}, ${ptop.fn} returned ${fmt(prev.ret, prev.heap)}`);
-        testFirst = false; // (the call was part of the test)
-      } else if (prev.ev === "call" && ptop.id === top.id) parts.push(script ? "Start of the program" : `Start of ${top.fn}`);
-      else if (ptop && ptop.id === top.id) {
-        const queues = new Set(result.pointers?.[top.fn]?.queues || []);
-        const changes = diff(variables(ptop, prev.heap), variables(top, s.heap), prev.heap, s.heap, queues);
-        // where the program went after an if / loop line (a test that was traced says more). Not after the body of a one-line
-        // `if (c <= a) dp[a] = ...`: its step is on the test's line too, and where it goes next says nothing about the test.
-        let k = i - 2;
-        while (k >= 0 && frameAt(all, k) !== top.id) k--;
-        const oneLineBody = k >= 0 && all[k].ev === "line" && all[k].line === prev.line;
-        const br = test || oneLineBody ? "" : branch(code, prev.line, s.line);
-        const from = sourcesOf(i); // what the new values were worked out from: dp[5]: inf → 3 · from dp[4] = 2
-        parts.push(...changes.slice(0, 3));
-        if (from) parts.push(changes.length ? `from ${from}` : `read ${from}`);
-        if (br) parts.push(br);
-        if (!parts.length && !test) parts.push("No variable changed");
-      }
-    } else parts.push("Start");
-    const what = [];
-    const add = (...xs) => what.push(...(what.length ? [" · "] : []), ...xs);
-    if (test && testFirst) add(...testNodes(test, true));
-    parts.forEach((p) => add(p));
-    if (test && !testFirst) add(...testNodes(test, true));
-    // what the line about to run will test and look up, worked out from the values now
-    const next = [];
-    const more = (...xs) => next.push(...(next.length ? [" · "] : []), ...xs);
-    let shown = false;
-    if (s.ev === "line" && s.cond && result.conds?.[s.cond.k]) {
-      const calls = (all[i + 1]?.stack.length ?? 0) > s.stack.length; // (the test calls a function: its values aren't known yet)
-      const nodes = testNodes({ k: i, cond: s.cond, c: result.conds[s.cond.k] }, false, !calls);
-      shown = nodes.length > 1;
-      more("checks ", ...nodes);
-    }
-    // what it will read, at the indexes worked out now (dp[3][1] = 1); then lookups that aren't reads at an index (is 6 in seen?)
-    const ahead = s.ev === "line" ? readsText(accessesAt(s, result.pointers)) : null;
-    if (ahead) more(`reads ${ahead}`);
-    if (s.ev === "line") lookups(s, top).forEach((l) => (!shown || !l.label) && !(ahead && l.label) && more(l.text));
-    // which pass of the loop around the line this is (not on the loop's own line: there, a pass starts or the loop ends)
-    const loop = s.ev === "line" ? loopAround(result.outline, s.line) : null;
-    const pass = loop && s.line !== headerOf(loop) ? loopPass(all, i, result.outline) : 0;
-    const ranLine = prev && prev.ev === "line" && prev.stack.length ? prev.line : 0;
-    return [
-      h(
-        "span.vz-step",
-        {},
-        h("span", {
-          textContent:
-            ranLine && s.ev === "line"
-              ? `Line ${ranLine} ran`
-              : s.ev === "call"
-                ? "Call"
-                : s.ev === "return"
-                  ? "Return"
-                  : s.ev === "exception"
-                    ? "Error"
-                    : `Line ${s.line}`,
-        }),
-        pass > 0 && h("span.vz-pass", { textContent: `loop pass ${pass}` }),
-      ),
-      h(
-        "div.vz-say",
-        {},
-        h("div.vz-what", {}, what),
-        next.length > 0 && h("div.vz-next", {}, h("span.vz-nl", { textContent: "next " }), next),
-      ),
-    ];
-  }
-
   // The lookups the line about to run will do, worked out from the current values: "is 9 - 7 = 2 in seen? yes".
   function lookups(s, frame) {
     const info = (result.pointers || {})[frame.fn];
@@ -2471,17 +2591,22 @@ export function mountApp(host, picker, examples) {
   }
 
   function drawStack(s, prev, animate) {
-    const live = new Set(s.stack.map((f) => f.id));
+    // recursion: the callers the call tree has lit (the same function, again deeper) aren't drawn; the others are (the outer function
+    // with the grid a nested dfs fills)
+    const drawn = s.stack.filter((f, d) => !recursive || !s.stack.slice(d + 1).some((g) => g.fn === f.fn));
+    const live = new Set(drawn.map((f) => f.id));
     for (const [id, fe] of frameEls)
       if (!live.has(id)) {
         fe.el.remove();
+        fe.scalars.remove();
         frameEls.delete(id);
       }
     const prevFrames = new Map((prev ? prev.stack : []).map((f) => [f.id, f]));
     const topFrame = s.stack[s.stack.length - 1];
     // the callers' structures the current call also has (a list sorted in place, a grid searched) are drawn once, in the current call
     const shared = new Set(variables(topFrame, s.heap).flatMap(([, v]) => (isRef(v) ? [v.r] : [])));
-    s.stack.forEach((f, depth) => {
+    drawn.forEach((f, slot) => {
+      const depth = s.stack.indexOf(f);
       const isTop = depth === s.stack.length - 1;
       let fe = frameEls.get(f.id);
       if (!fe) {
@@ -2499,52 +2624,26 @@ export function mountApp(host, picker, examples) {
           framePref.set(id, !fe.open);
           draw(false);
         };
-        // delegated hover listeners for variable linking
-        fe.el.addEventListener("mouseover", (e) => {
-          const target = e.target.closest("[data-var]");
-          if (!target) return;
-          const vars = target.dataset.var.split(" ");
-          vars.forEach((v) => {
-            fe.el.querySelectorAll(`[data-var]`).forEach((el) => {
-              if (el.dataset.var.split(" ").includes(v)) el.classList.add("link");
-            });
-          });
-        });
-        fe.el.addEventListener("mouseout", (e) => {
-          const target = e.target.closest("[data-var]");
-          if (!target) return;
-          fe.el.querySelectorAll(".link").forEach((el) => el.classList.remove("link"));
-        });
-        // keyboard focus support for chips
-        fe.el.addEventListener("focusin", (e) => {
-          const target = e.target.closest("[data-var]");
-          if (!target) return;
-          const vars = target.dataset.var.split(" ");
-          vars.forEach((v) => {
-            fe.el.querySelectorAll(`[data-var]`).forEach((el) => {
-              if (el.dataset.var.split(" ").includes(v)) el.classList.add("link");
-            });
-          });
-        });
-        fe.el.addEventListener("focusout", (e) => {
-          const target = e.target.closest("[data-var]");
-          if (!target) return;
-          fe.el.querySelectorAll(".link").forEach((el) => el.classList.remove("link"));
-        });
         fe.el.append(fe.head, fe.scalars, fe.structs);
         if (animate) fe.el.classList.add("enter");
         frameEls.set(f.id, fe);
       }
-      if (stage.children[depth] !== fe.el) stage.insertBefore(fe.el, stage.children[depth] || null);
+      if (stage.children[slot] !== fe.el) stage.insertBefore(fe.el, stage.children[slot] || null);
       // the current call and its two callers are open; a click on a caller's header opens or closes it
       fe.isTop = isTop;
-      fe.open = isTop || (framePref.has(f.id) ? framePref.get(f.id) : depth >= s.stack.length - 3);
+      fe.open = isTop || (framePref.has(f.id) ? framePref.get(f.id) : slot >= drawn.length - 3);
       fe.el.classList.toggle("top", isTop);
       fe.el.classList.toggle("ret", isTop && s.ev === "return");
       fe.el.classList.toggle("paused", !isTop && fe.open);
       fe.el.classList.toggle("collapsed", !fe.open);
+      // a single call of code that doesn't recurse: no header (the caption says where the run is)
+      fe.el.classList.toggle("solo", isTop && !recursive && drawn.length === 1);
+      // the current call's variables go to the line at the foot of the column; a caller's are on its card
+      if (isTop) {
+        if (fe.scalars.parentNode !== varBar) varBar.replaceChildren(fe.scalars);
+      } else if (fe.scalars.parentNode !== fe.el) fe.el.insertBefore(fe.scalars, fe.structs);
       fe.head.title = isTop ? "" : `Click to ${fe.open ? "hide" : "show"} this call's data`;
-      frameHead(fe, f, s, depth, isTop);
+      frameHead(fe, f, s, slot, isTop);
       // nodes the outer frames point at (recursion on a tree): drawn too, so the top frame shows the whole tree and the path down it
       const outerNodes = s.stack.slice(0, depth).flatMap((o) => o.loc.filter(([, x]) => isNode(objOf(x, s.heap))).map(([, x]) => x.r));
       drawFrame(
@@ -2627,11 +2726,10 @@ export function mountApp(host, picker, examples) {
     fe.head.replaceChildren(...children);
   }
 
-  // What the test about to run (or that just ran) in the current call compares: list items (list name -> indexes), grid cells
-  // (name -> "r,c") and variables. Only the operands the run worked out (an and / or can stop early).
+  // What the test that just ran in the current call compared: list items (list name -> indexes), grid cells (name -> "r,c") and
+  // variables. Only the operands the run worked out (an and / or can stop early).
   function compared(ints, frame, heap) {
-    const s = currentStep();
-    const t = s.ev === "line" && s.cond && result.conds?.[s.cond.k] ? { cond: s.cond, c: result.conds[s.cond.k] } : testBefore(i);
+    const t = testBefore(i);
     const out = { cells: new Map(), grid: new Map(), vars: new Set() };
     if (!t) return out;
     const add = (m, k, x) => m.set(k, (m.get(k) || new Set()).add(x));
@@ -2666,16 +2764,43 @@ export function mountApp(host, picker, examples) {
     for (let k = 0; k <= i; k++) for (const x of effects[k]?.list || []) if (x.w && x.ref === ref && x.at !== null) out.add(x.at);
     return out;
   }
+  // A table the code fills (a DP table; not a list it was given): the cells it writes later in the run but hasn't yet. null for anything
+  // else.
+  function unfilled(ref, name, frame, keys) {
+    const call = callOf.get(frame.id);
+    if (call && steps()[call.call].params?.includes(name)) return null;
+    const later = new Set();
+    for (let k = i + 1; k < effects.length; k++)
+      for (const x of effects[k]?.list || []) if (x.w && x.ref === ref && x.at !== null) later.add(x.at);
+    if (!later.size) return null;
+    const done = filledSoFar(ref);
+    const out = new Set(keys.filter((k) => later.has(k) && !done.has(k)));
+    return out.size ? out : null;
+  }
+  // runs [from, to] of 2 or more items at the start or end of a list that are where they'll be once sorted
+  function sortedRuns(nums) {
+    const at = [...settled(nums)].sort((a, b) => a - b);
+    const runs = [];
+    for (const k of at) {
+      const last = runs.at(-1);
+      if (last && last[1] === k - 1) last[1] = k;
+      else runs.push([k, k]);
+    }
+    return runs.filter(([a, b]) => b > a);
+  }
   // `stack`: the frames on the call stack (a recursion over a grid marks the cells its callers are at)
   function drawFrame(fe, frame, heap, prevFrame, prevHeap, animate, isTop, outerNodes = [], shared = null, stack = []) {
     const vars = variables(frame, heap);
     const ptrInfo = (result.pointers || {})[frame.fn] || { idx: {}, keys: {}, grid: {} };
-    const looks = isTop && currentStep().ev === "line" ? lookups(currentStep(), frame) : [];
+    // the lookups the line that ran did, with the values then (is 2 in seen? no)
+    const from = steps()[story.frames[fk]?.from];
+    const looks = isTop && from?.ev === "line" && frameAt([from], 0) === frame.id ? lookups(from, from.stack.at(-1)) : [];
     const ints = new Map(vars.filter(([, v]) => Number.isInteger(v)).map(([k, v]) => [k, v]));
     const valuesByName = new Map(vars.map(([k, v]) => [k, v]));
     const before = new Map(prevFrame ? variables(prevFrame, prevHeap) : []);
     const cmp = isTop ? compared(ints, frame, heap) : null;
     const asChip = new Set();
+    const bad = isTop && story.frames[fk]?.kind === "error" ? story.frames[fk].bad : null;
     // track which variables are drawn as pointers/labels (for hover linking and static cue on chips)
     const drawnAsPointer = new Set();
     // which variable points at which node (for lists, trees, graphs)
@@ -2690,11 +2815,16 @@ export function mountApp(host, picker, examples) {
     // structures first (in variable order), scalars as chips
     for (const [name, v] of vars) {
       const len = typeof v === "string" ? v.length : (objOf(v, heap)?.v?.length ?? 0);
+      // (one just past the end only when the code indexes the list with it, or it just moved there: a loop's end is no pointer)
+      const indexes = (p) => (ptrInfo.acc || []).some((a) => a.on === name && a.ix?.[0] === "n" && a.ix[1] === p);
       /** @type {{ name: string, idx: number, probe?: boolean }[]} */
       const ptrs = windowEnds(ptrInfo.idx[name] || [], ints)
         .filter((p) => ints.has(p))
         .map((p) => ({ name: p, idx: ints.get(p) }))
-        .filter((p) => p.idx >= 0 && p.idx <= len);
+        .filter(
+          (p) =>
+            p.idx >= 0 && (p.idx < len || (p.idx === len && (indexes(p.name) || (before.has(p.name) && before.get(p.name) !== p.idx)))),
+        );
       for (const l of looks) {
         if (l.on === name && l.label && Number.isInteger(l.idx) && l.idx >= 0 && l.idx < len)
           ptrs.push({ name: l.label, idx: l.idx, probe: true });
@@ -2763,10 +2893,10 @@ export function mountApp(host, picker, examples) {
       if (kind === "array" || kind === "chars") {
         const items = typeof v === "string" ? [...v] : o.v.map((x) => cellText(x, heap));
         const nums = typeof v !== "string" && o.v.length > 1 && o.v.every((x) => typeof x === "number") ? o.v : null;
-        const key = `${frame.fn}:${name}`;
-        if (nums && !barsPref.has(key)) barsPref.set(key, (ptrInfo.swaps || []).includes(name)); // sorting code starts as bars
-        // the items the code compares, the two it just swapped, and (sorting) the ones already where they'll end up
-        const marks = {};
+        // the items the test that ran compared, the two it just swapped; sorting code draws its numbers as bars, with a bracket under
+        // the ones already where they'll end up
+        /** @type {Record<string, any>} */
+        const marks = { why: {} };
         if (cmp?.cells.has(name)) marks.cmp = new Set([...cmp.cells.get(name)].map((x) => (x < 0 ? x + items.length : x)));
         const was = objOf(before.get(name), prevHeap);
         const sw =
@@ -2778,15 +2908,25 @@ export function mountApp(host, picker, examples) {
             : null;
         if (isTop && sw) marks.swp = new Set(sw);
         const sorting = (ptrInfo.swaps || []).includes(name);
-        if (isTop && nums && sorts.has(name) && sorting) marks.done = settled(nums);
-        // what the line that ran read and wrote, what's been written so far (a DP array filling up), and the items whose index is kept in
+        const sorted = isTop && nums && sorts.has(name) && sorting ? sortedRuns(nums) : [];
+        // what the line that ran read and wrote, what isn't written yet (a DP array filling up), and the items whose index is kept in
         // another list (a monotonic stack of indexes)
         const ref = isRef(v) ? v.r : `s:${name}`;
         if (isTop) Object.assign(marks, touched(ref));
-        const fill = sorting ? null : filledSoFar(ref);
-        if (fill?.size) marks.fill = fill;
+        const blank = sorting
+          ? null
+          : unfilled(
+              ref,
+              name,
+              frame,
+              items.map((t, k) => [k, t]),
+            );
+        if (blank) marks.unfilled = blank;
         const held = heldBy(ptrInfo, name, valuesByName, heap, items.length);
-        if (held) marks.held = held[1];
+        if (held) {
+          marks.held = held[1];
+          marks.why.held = `in ${held[0]}`;
+        }
         // in a caller frame: which cells were passed as a slice to the callee (worked out afresh each step: once the call returns, no mark)
         item.sliceParam = null;
         if (!isTop && stack.length > 0) {
@@ -2828,12 +2968,9 @@ export function mountApp(host, picker, examples) {
             }
           }
         }
-        item.view.update(items, ptrs, animate && !reassigned, nums, !!nums && barsPref.get(key), [], marks);
-        item.toggle = nums ? key : null;
-        const named = {};
-        if (held) named.held = `in ${held[0]}`;
-        if (item.sliceParam) named.slice = `→ ${item.sliceParam}`;
-        item.legend = legendOf(marks, named);
+        if (item.sliceParam) marks.why.slice = `passed as ${item.sliceParam}`;
+        const past = bad && bad.on === name && Number.isInteger(bad.at) && (bad.at >= items.length || bad.at < -items.length) ? bad : null;
+        item.view.update(items, ptrs, animate && !reassigned, nums, !!nums && sorting, [], marks, sorted, past);
         // track variables drawn as pointers (skip probes)
         ptrs.filter((p) => !p.probe).forEach((p) => drawnAsPointer.add(p.name));
       } else if (kind === "queue") {
@@ -2872,11 +3009,17 @@ export function mountApp(host, picker, examples) {
             curVars = [r, c];
           }
         }
-        const marks = {};
+        /** @type {Record<string, any>} */
+        const marks = { why: {} };
         if (cmp?.grid.has(name)) marks.cmp = cmp.grid.get(name);
         if (isTop) Object.assign(marks, touched(v.r));
-        const fill = filledSoFar(v.r);
-        if (fill.size) marks.fill = fill;
+        const blank = unfilled(
+          v.r,
+          name,
+          frame,
+          rows.flatMap((row, r) => row.map((_, c) => `${r},${c}`)),
+        );
+        if (blank) marks.unfilled = blank;
         // a recursion over the grid (flood fill, word search): the cells its callers are at, the way down to this call
         if (isTop && g) {
           const path = new Set();
@@ -2891,7 +3034,6 @@ export function mountApp(host, picker, examples) {
           if (path.size) marks.path = path;
         }
         // a visited set of (r, c), and a queue / stack of them (a BFS over a grid)
-        const named = {};
         for (const [n2, v2] of vars) {
           const o2 = objOf(v2, heap);
           if (!o2 || n2 === name || !o2.v) continue;
@@ -2899,10 +3041,9 @@ export function mountApp(host, picker, examples) {
           const cells = which && !marks[which] ? cellsIn(o2, heap, rows.length, (rows[0] || []).length) : null;
           if (!cells) continue;
           marks[which] = cells;
-          named[which] = `in ${n2}`;
+          marks.why[which] = `in ${n2}`;
         }
         item.view.update(rows, cur, animate, marks, gridAxes(ptrInfo, g, valuesByName, rows.length, (rows[0] || []).length), curVars);
-        item.legend = legendOf(marks, named);
         // track variables drawn as grid coordinates
         if (curVars) curVars.forEach((v) => drawnAsPointer.add(v));
       } else if (kind === "dict") {
@@ -2933,7 +3074,6 @@ export function mountApp(host, picker, examples) {
           }
         const state = graphState(g, o, name, vars, heap, ptrInfo, valuesByName, labels);
         item.view.update(g, labels, animate, state);
-        item.legend = state.legend;
         // track variables drawn as graph labels
         labels.forEach((names) => names.forEach((n) => drawnAsPointer.add(n)));
       } else if (kind === "rows") {
@@ -2963,7 +3103,7 @@ export function mountApp(host, picker, examples) {
         item.wrap.lastChild.replaceChildren(...o.a.map(([k, x]) => h("span.vz-chip", { textContent: `${k} = ${fmt(x, heap)}` })));
       }
       const names = [name, ...item.alias];
-      // simplified descriptor: "queue · 5", "list · 8", "dict · 3", keeping class names like "MinStack"
+      // the name, and a class's name (MinStack); the type and size are in its tooltip
       let descriptor = "";
       if (typeof v === "string") {
         descriptor = `${SYN.js ? "string" : "str"} · ${v.length}`;
@@ -2972,19 +3112,6 @@ export function mountApp(host, picker, examples) {
         const count = o.n !== undefined ? ` · ${o.n}` : "";
         descriptor = `${typeName}${count}`;
       }
-      const legend = ["array", "chars", "grid", "graph"].includes(kind) ? item.legend || [] : [];
-      // track all marks ever shown for this structure to keep legend stable
-      const historyKey = `${frame.id}:${name}`;
-      const allMarks = legendHistory.get(historyKey) || new Set();
-      for (const [m] of legend) if (m !== "slice") allMarks.add(m); // (a slice is the caller's while its call runs, not a mark to keep)
-      legendHistory.set(historyKey, allMarks);
-      const currentMarks = new Set(legend.map(([m]) => m));
-      const stableLegend = [...new Set([...allMarks, ...currentMarks])]
-        .filter((m) => MARKS.includes(m))
-        .map((m) => {
-          const text = legend.find(([mark]) => mark === m)?.[1] || LEGEND[m] || m;
-          return [m, text, currentMarks.has(m)];
-        });
       // an empty container is a word on its name line, not a box
       const isEmpty =
         !!o && ["array", "chars", "queue", "stack", "heap", "set", "dict"].includes(kind) && (o.kv ?? o.v ?? [0]).length === 0;
@@ -3012,23 +3139,9 @@ export function mountApp(host, picker, examples) {
       item.wrap.classList.toggle("vz-small", sizeCls === "vz-small");
       item.label.replaceChildren(
         ...[
-          h("b", { textContent: names.join(" = ") }),
-          h("span", { textContent: descriptor }),
+          h("b", { textContent: names.join(" = "), title: descriptor }),
+          o?.cls && h("span", { textContent: o.cls }),
           isEmpty && h("span.vz-empty", { textContent: "empty" }),
-          ...stableLegend.map(([m, text, active]) => {
-            const badge = h(`i.vz-lg.${m}`, { textContent: text });
-            badge.classList.toggle("dimmed", !active);
-            return badge;
-          }),
-          item.toggle &&
-            h("button.vz-toggle", {
-              textContent: barsPref.get(item.toggle) ? "cells" : "bars",
-              title: "Draw the numbers as bars or as cells",
-              onclick: () => {
-                barsPref.set(item.toggle, !barsPref.get(item.toggle));
-                draw(false);
-              },
-            }),
         ].filter(Boolean),
       );
       // hide the body when empty
@@ -3242,9 +3355,8 @@ export function mountApp(host, picker, examples) {
       if (document.activeElement === editor) editor.blur(); // (Ctrl+Enter in the code: the keys step through the run again)
       frameEls.forEach((fe) => fe.el.remove());
       frameEls.clear();
-      barsPref.clear();
+      varBar.replaceChildren();
       framePref.clear();
-      legendHistory.clear();
       lastTop = null;
       const tree = callTree(r.steps);
       callOf = new Map();
@@ -3260,7 +3372,6 @@ export function mountApp(host, picker, examples) {
           return on.filter((x, k) => on.indexOf(x) !== k);
         }),
       );
-      effects = lineEffects(r.steps, r.pointers);
       calls.build(tree);
       callSum.textContent =
         tree.calls < 2
@@ -3271,15 +3382,18 @@ export function mountApp(host, picker, examples) {
         status.className = "vz-status err";
         status.textContent = r.error || "Nothing to show: the input didn't call any of the code's functions.";
         stage.replaceChildren();
+        varBar.replaceChildren();
         caption.replaceChildren();
         outBox.replaceChildren();
         return;
       }
-      i = 0;
-      // recursion is best seen as its call tree; anything else starts on the data (unless the code tree is open)
-      const recursive = r.steps.some((st) => new Set(st.stack.map((f) => f.fn)).size < st.stack.length);
-      if (tab === "outline") draw(false);
-      else show(recursive ? "calls" : "data");
+      story = buildStory(r, code);
+      effects = story.effects;
+      fk = 0;
+      i = story.frames[0]?.i ?? 0;
+      recursive = r.steps.some((st) => new Set(st.stack.map((f) => f.fn)).size < st.stack.length);
+      buildTimeline();
+      show(tab);
     } catch (e) {
       if (my !== runs) return;
       status.className = "vz-status err";

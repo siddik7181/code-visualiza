@@ -13,6 +13,7 @@ import {
   detectLanguage,
   callArgs,
   evalBound,
+  fillCalls,
   graphState,
   gridAxes,
   isRefGridInStack,
@@ -30,6 +31,7 @@ import {
   toJSON,
   windowEnds,
 } from "../extension/visualizer.js";
+import { buildStory } from "../extension/story.js";
 import { trace } from "./python.mjs";
 
 const all = (n) => [n, ...n.children.flatMap(all)];
@@ -518,6 +520,19 @@ describe("callArgs(): the arguments of a call on the caller's line", () => {
   });
 });
 
+describe("fillCalls(): a waiting caller's line with what its calls returned so far", () => {
+  test("each call is replaced by its value, in order", () => {
+    const fib = [{ fn: "fib" }, { fn: "fib" }];
+    assert.equal(fillCalls("return fib(n - 1) + fib(n - 2)", fib.slice(0, 1), ["?"]), "return ? + fib(n - 2)");
+    assert.equal(fillCalls("return fib(n - 1) + fib(n - 2)", fib, ["1", "?"]), "return 1 + ?");
+    const dfs = [{ fn: "dfs" }, { fn: "dfs" }];
+    assert.equal(fillCalls("return max(self.dfs(node.left), self.dfs(node.right)) + 1", dfs, ["2", "?"]), "return max(2, ?) + 1");
+  });
+  test("a call the line doesn't show (made in a loop, by another line): null", () => {
+    const calls = [{ fn: "go" }, { fn: "go" }, { fn: "go" }];
+    assert.equal(fillCalls("return sum(go(x) for x in kids)", calls, ["1", "2", "?"]), null);
+  });
+});
 describe("toJSON(): a result as LeetCode prints it", () => {
   const result = (code, call) => {
     const r = trace(code, call).result;
@@ -580,4 +595,16 @@ describe("detectLanguage(): Python or JavaScript, for code selected on a page", 
   });
 
   test("a tie (nothing tells) is Python", () => assert.equal(detectLanguage("x = 1"), "python"));
+});
+
+describe("the data view's story", () => {
+  test("a new dict key is said once, not also as a write that changed nothing", () => {
+    setLanguage("python");
+    const code = "def f(nums):\n    seen = {}\n    for i, x in enumerate(nums):\n        seen[x] = i";
+    const st = buildStory(trace(code, "f([3, 8])"), code.split("\n"));
+    const said = st.frames
+      .filter((f) => f.line === 4)
+      .map((f) => f.sentence.map((p) => (typeof p === "string" ? p : Object.values(p)[0])).join(""));
+    assert.deepEqual(said, ["seen[3] is added, set to 0", "seen[8] is added, set to 1"]);
+  });
 });

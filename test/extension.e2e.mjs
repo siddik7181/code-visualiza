@@ -108,8 +108,10 @@ describe("the extension in Chrome", { skip: !existsSync(CHROME) && `no Chrome at
   test("the panel opens on the first example and replays it", async () => {
     const page = await openPanel();
     const v = await view(page);
-    assert.deepEqual([v.picker, v.input, v.count, v.status], ["Fibonacci (call tree)", "fib(5)", "1 / 60", ""]);
-    assert.equal(v.tab, "Call tree"); // recursion opens on its call tree
+    assert.deepEqual([v.picker, v.input, v.count, v.status], ["Fibonacci (call tree)", "fib(5)", "1 / 45", ""]);
+    assert.deepEqual(await page.$$eval("button.vz-tab", (bs) => bs.map((b) => b.textContent)), ["Data", "Code tree"]);
+    assert.equal(v.tab, "Data");
+    assert.equal(await page.$eval("div.vz-calls", (e) => e.hidden), false); // recursion: its call tree is part of the data
     await press(page, "End");
     assert.match((await view(page)).out, /Result 5/);
     await page.close();
@@ -139,13 +141,27 @@ describe("the extension in Chrome", { skip: !existsSync(CHROME) && `no Chrome at
     assert.ok(before < (await shown()), "calls appear as the run goes");
     assert.equal(await shown(), 15); // fib(5) makes 15 calls
     await clickText(page, "button.vz-cnode", "fib(3)");
-    assert.match((await view(page)).caption, /fib\(n=3\)/);
+    assert.match((await view(page)).caption, /fib\(n = 3\)/);
     assert.equal(await page.$eval(".vz-stage", (e) => e.hasAttribute("hidden")), false); // the data stays in view under the call tree
     assert.match(await page.$eval(".vz-csum", (e) => e.textContent), /^15 calls · 3 redo an earlier call/);
     await page.keyboard.down("Shift");
     await press(page, "ArrowUp"); // step out: to fib(3)'s return
     await page.keyboard.up("Shift");
     assert.match((await view(page)).caption, /fib returns 2/);
+    await page.close();
+  });
+
+  test("an index out of range shows the slot it asked for and the line that set it up", async () => {
+    const page = await openPanel();
+    const code =
+      "def bubble_sort(a):\n    n = len(a)\n    for i in range(n):\n        for j in range(n - i):\n            if a[j] > a[j + 1]:\n                a[j], a[j + 1] = a[j + 1], a[j]\n    return a";
+    await runCode(page, code, "bubble_sort([5, 1, 4, 2, 8, 3])");
+    await press(page, "End");
+    assert.match((await view(page)).caption, /IndexError.*a\[j \+ 1\] is a\[6\]/);
+    assert.equal(await page.$eval(".vz-line.bad .vz-src", (e) => e.textContent.trim()), "if a[j] > a[j + 1]:");
+    assert.equal(await page.$eval(".vz-tag", (e) => e.textContent), "← j became 5 here");
+    assert.equal(await page.$eval(".vz-cell.ghost", (e) => e.textContent), "?6");
+    assert.equal(await page.$eval(".vz-seg.error", (e) => e.classList.contains("on")), true);
     await page.close();
   });
 
@@ -215,7 +231,7 @@ describe("the extension in Chrome", { skip: !existsSync(CHROME) && `no Chrome at
     await idle(page);
     assert.equal(await page.$eval("select.vz-lang", (e) => e.value), "javascript");
     await press(page, "ArrowRight", 8);
-    assert.match(await page.$eval(".vz-structs", (e) => e.textContent), /seen\s*Map · \d/);
+    assert.match(await page.$eval(".vz-structs", (e) => e.textContent), /seen\s*Map/);
     await runCode(page, "function f() {\n  let x = null;\n  return x;\n}", "f()");
     await press(page, "End");
     assert.match((await view(page)).out, /Result null/);

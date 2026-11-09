@@ -223,10 +223,6 @@ button:disabled {
   opacity: 0.6;
   user-select: none;
 }
-.vz-line.ran {
-  background: color-mix(in srgb, var(--easy) 12%, transparent);
-  border-left-color: color-mix(in srgb, var(--easy) 70%, transparent);
-}
 .vz-line.cur {
   background: color-mix(in srgb, var(--acc) 20%, transparent);
   border-left-color: var(--acc);
@@ -239,66 +235,59 @@ button:disabled {
   background: color-mix(in srgb, var(--hard) 22%, transparent);
   border-left-color: var(--hard);
 }
+/* the story: where the run is, one sentence for the line that just ran, and (for some lines) a note under it */
 .vz-caption {
   display: flex;
-  gap: 8px;
-  align-items: baseline;
-  font-size: 12.5px;
-  min-height: 20px;
-}
-.vz-step {
-  flex: none;
-  display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--acc);
+  gap: 4px;
+  min-height: 5.2em; /* (a sentence or two, so the pictures don't jump) */
 }
-.vz-pass {
-  font-weight: 500;
-  font-size: 10px;
-  color: var(--dim);
-}
-/* what happened (and the next line's test and lookups below it): two lines kept, so the pictures don't jump */
-.vz-say {
-  min-width: 0;
-  min-height: 2.9em;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.vz-what {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+.vz-where {
   font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.vz-next {
-  font: 11.5px var(--mono);
+.vz-say {
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+.vz-detail {
+  font-size: 13px;
   color: var(--dim);
 }
-.vz-nl {
-  font-weight: 600;
-}
-.vz-cond {
+.vz-caption code {
+  font: 0.82em var(--mono);
   padding: 0 4px;
   border-radius: 4px;
-  font: inherit;
-  color: var(--text);
-  background: color-mix(in srgb, var(--medium) 16%, transparent);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
-.vz-tf {
-  padding: 0 5px;
-  border-radius: 4px;
-  color: #fff;
-  background: var(--easy);
+.vz-caption .vz-val {
+  padding: 0;
+  white-space: normal;
+  font: 600 0.88em var(--mono);
+  color: var(--acc);
 }
-.vz-tf.no {
-  background: var(--hard);
+.vz-caption .vz-err {
+  color: var(--hard);
+}
+/* the line that set up an error: what it did, after it */
+.vz-tag {
+  margin-left: 12px;
+  font: 11px var(--mono);
+  color: var(--hard);
+  opacity: 0.85;
 }
 .vz-stage {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.vz-right:not(.split) > .vz-stage {
+  padding-top: clamp(8px, 5vh, 56px);
 }
 .vz-frame {
   border: 1px solid var(--line);
@@ -325,13 +314,15 @@ button:disabled {
   border-bottom-left-radius: 6px;
   pointer-events: none;
 }
+/* the current call: no card, its data on the page (its callers, when drawn, are the cards above it) */
 .vz-frame.top {
-  border: 1.5px solid color-mix(in srgb, var(--text) 40%, var(--line));
-  background: color-mix(in srgb, var(--text) 3%, var(--card));
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--text) 8%, transparent);
+  border: 0;
+  background: none;
+  padding: 0;
+  gap: 12px;
 }
-.vz-frame.ret {
-  border-color: color-mix(in srgb, var(--easy) 60%, var(--line));
+.vz-frame.solo > .vz-fhead {
+  display: none;
 }
 .vz-frame.collapsed {
   padding: 5px 10px;
@@ -397,7 +388,7 @@ button:disabled {
 }
 .vz-frame.ret .vz-fstat {
   font-weight: 600;
-  color: var(--easy);
+  color: var(--acc);
 }
 .vz-scalars,
 .vz-set,
@@ -426,8 +417,8 @@ button:disabled {
   font-weight: 600;
 }
 .vz-var.cmp {
-  border-color: var(--medium);
-  background: color-mix(in srgb, var(--medium) 16%, var(--bg));
+  border-color: var(--acc);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--acc) 25%, transparent);
 }
 /* a variable that is also drawn on a picture (a pointer, a node's label): its name is underlined the way a link is, and hovering it shows
    where (see .link) */
@@ -472,25 +463,9 @@ svg .link {
   position: relative;
   transition: opacity 200ms;
 }
-/* in the top frame, de-emphasize inactive structures to focus on what the line touches */
-.vz-frame.top .vz-struct {
+/* in the top frame, when it has several structures, the ones the line didn't touch step back */
+.vz-frame.top .vz-structs:has(> .vz-struct + .vz-struct) > .vz-struct:not(.active, :hover, :focus-within) {
   opacity: 0.65;
-}
-.vz-frame.top .vz-struct:hover,
-.vz-frame.top .vz-struct:focus-within,
-.vz-frame.top .vz-struct.active {
-  opacity: 1;
-}
-/* active structures (touched by the current line) get a 2px left accent in the gutter */
-.vz-struct.active::before {
-  content: "";
-  position: absolute;
-  left: -6px;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: color-mix(in srgb, var(--text) 45%, transparent);
-  border-radius: 1px;
 }
 .vz-sname {
   display: flex;
@@ -504,7 +479,8 @@ svg .link {
     monospace;
 }
 .vz-sname b {
-  color: var(--acc);
+  color: var(--dim);
+  font-weight: 500;
 }
 .vz-sname span {
   font-size: 10.5px;
@@ -527,15 +503,15 @@ svg .link {
 .vz-cell {
   position: relative;
   flex: none;
-  width: 34px;
-  height: 34px;
+  width: 42px;
+  height: 42px;
   display: grid;
   place-items: center;
-  border-radius: 7px;
+  border-radius: 9px;
   border: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--card);
   font:
-    600 13px ui-monospace,
+    600 15px ui-monospace,
     SFMono-Regular,
     Menlo,
     monospace;
@@ -544,88 +520,104 @@ svg .link {
     opacity var(--vz-dur),
     background var(--vz-dur);
 }
-.vz-cell.out {
-  opacity: 0.32;
-}
-/* what a test compares (amber), the two items just swapped (purple), the items already in their sorted place (green) */
-.vz-cell.done {
-  border-color: var(--easy);
-  background: color-mix(in srgb, var(--easy) 14%, var(--bg));
-}
-.vz-cell.swp {
-  border-color: var(--vz-write);
-  background: color-mix(in srgb, var(--vz-write) 20%, var(--bg));
-}
+/* one colour for what the line that ran did: what it looked at (compared, read) is ringed, what it changed (wrote, swapped) is filled */
 .vz-cell.cmp,
-.vz-gc.cmp {
-  border-color: var(--medium);
-  background: color-mix(in srgb, var(--medium) 26%, var(--bg));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--medium) 30%, transparent);
+.vz-gc.cmp,
+.vz-cell.rd,
+.vz-gc.rd {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--acc) 30%, transparent);
 }
-.vz-arr.bars .vz-cell.cmp .vz-bar {
-  background: var(--medium);
+.vz-cell.swp,
+.vz-gc.swp,
+.vz-cell.wr,
+.vz-gc.wr {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 45%, var(--bg));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--acc) 30%, transparent);
 }
-.vz-arr.bars .vz-cell.swp .vz-bar {
-  background: var(--vz-write);
+.vz-arr.bars .vz-cell:is(.cmp, .rd) .vz-bar {
+  background: color-mix(in srgb, var(--acc) 55%, var(--card));
+  outline: 2px solid var(--acc);
+  outline-offset: 1px;
 }
-.vz-arr.bars .vz-cell.done .vz-bar {
-  background: var(--easy);
+.vz-arr.bars .vz-cell:is(.swp, .wr) .vz-bar {
+  background: var(--acc);
 }
-.vz-sname .vz-lg {
-  font: 10px var(--mono);
-  font-style: normal;
-  padding: 0 5px;
-  border-radius: 4px;
-  border: 1px solid;
-  transition: opacity 150ms;
+/* a cell the code hasn't filled yet (a DP table), and the one past the end that an error asked for */
+.vz-cell.unfilled,
+.vz-gc.unfilled {
+  color: color-mix(in srgb, var(--dim) 70%, transparent);
+  border-style: dashed;
 }
-.vz-lg.dimmed {
-  opacity: 0.35;
+.vz-cell.ghost {
+  border: 1.5px dashed var(--hard);
+  background: color-mix(in srgb, var(--hard) 10%, var(--bg));
+  color: var(--hard);
 }
-.vz-lg.cmp {
-  border-color: var(--medium);
-  background: color-mix(in srgb, var(--medium) 22%, transparent);
+.vz-ptr.bad {
+  color: var(--hard);
 }
-.vz-lg.swp {
-  border-color: var(--vz-write);
-  background: color-mix(in srgb, var(--vz-write) 18%, transparent);
+.vz-ptr.bad i {
+  border-bottom-color: var(--hard);
 }
-.vz-lg.done {
-  border-color: var(--easy);
-  background: color-mix(in srgb, var(--easy) 14%, transparent);
+/* under the items already where they'll be once sorted */
+.vz-brackets {
+  position: relative;
+  height: 0;
+}
+.vz-brackets:not(:empty) {
+  height: 26px;
+}
+.vz-sorted {
+  position: absolute;
+  top: 4px;
+  height: 6px;
+  border: 1.5px solid color-mix(in srgb, var(--text) 35%, transparent);
+  border-top: 0;
+  border-radius: 0 0 4px 4px;
+  font-size: 9.5px;
+  line-height: 30px;
+  text-align: center;
+  color: var(--dim);
+  white-space: nowrap;
+  transition:
+    left var(--vz-dur),
+    width var(--vz-dur);
 }
 .vz-v.long,
 .vz-gc.long {
-  font-size: 10px;
+  font-size: 11px;
 }
 .vz-v.xlong,
 .vz-gc.xlong {
-  font-size: 8.5px;
-  max-width: 32px;
+  font-size: 9px;
+  max-width: 40px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* the index, under its cell; the pointers under the indexes */
 .vz-i {
   position: absolute;
-  top: -15px;
-  font-size: 9px;
+  bottom: -17px;
+  font-size: 10px;
   font-weight: 400;
   color: var(--dim);
 }
 .vz-cells {
-  margin-top: 14px;
+  margin-bottom: 17px;
 }
 .vz-ptrs {
   position: relative;
   height: 20px;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 .vz-ptr {
   position: absolute;
   left: 0;
   top: 0;
-  width: 34px;
+  width: 42px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -650,9 +642,9 @@ svg .link {
 /* grids */
 .vz-grid {
   display: inline-grid;
-  gap: 3px;
+  gap: 4px;
   font:
-    12px ui-monospace,
+    600 14px ui-monospace,
     SFMono-Regular,
     Menlo,
     monospace;
@@ -664,14 +656,14 @@ svg .link {
   place-items: center;
 }
 .vz-gc {
-  min-width: 26px;
-  height: 26px;
+  min-width: 34px;
+  height: 34px;
   padding: 0 3px;
   display: grid;
   place-items: center;
-  border-radius: 5px;
+  border-radius: 7px;
   border: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--card);
   transition: background var(--vz-dur);
 }
 .vz-gc.line {
@@ -828,17 +820,127 @@ svg .link {
   border-top: 1px solid var(--line);
   background: var(--bg);
 }
-.vz-slider {
+/* the run, cut into its chapters: a thin track each, filled up to where it is (a knob there), its name under it */
+.vz-time {
   flex: 1;
   min-width: 60px;
-  accent-color: var(--acc);
-}
-.vz-jumps {
   display: flex;
-  gap: 2px;
-  padding: 0 4px;
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
+  gap: 4px;
+  height: 28px;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+.vz-seg {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 3px;
+}
+.vz-seg::before,
+.vz-seg i {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 0;
+  height: 4px;
+  border-radius: 2px;
+}
+.vz-seg::before {
+  right: 0;
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+.vz-seg i {
+  width: 0;
+  background: var(--acc);
+}
+.vz-seg.on i::after {
+  content: "";
+  position: absolute;
+  right: -6px;
+  top: -4px;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--acc);
+  background: var(--bg);
+}
+.vz-seg.error::before {
+  background: color-mix(in srgb, var(--hard) 25%, transparent);
+}
+.vz-seg.error i {
+  background: var(--hard);
+}
+.vz-seg.error.on i::after {
+  border-color: var(--hard);
+}
+.vz-seg span {
+  position: absolute;
+  inset: 13px 0 0;
+  text-align: center;
+  font: 10px/15px var(--mono);
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.vz-seg.on span {
+  color: var(--text);
+  font-weight: 600;
+}
+.vz-more {
+  position: relative;
+}
+.vz-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 10;
+  min-width: 220px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 6px 24px color-mix(in srgb, #000 18%, transparent);
+}
+.vz-menu[hidden] {
+  display: none;
+}
+.vz-mi {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.vz-mi:hover,
+.vz-mi:focus-visible {
+  background: color-mix(in srgb, var(--acc) 16%, transparent);
+  outline: none;
+}
+.vz-mi kbd {
+  font: 11px var(--mono);
+  color: var(--dim);
+}
+/* a value the line copied, on its way there */
+.vz-fly {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font: 600 12px var(--mono);
+  color: #fff;
+  background: var(--acc);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--acc) 40%, transparent);
 }
 .vz-count {
   font:
@@ -862,13 +964,13 @@ svg .link {
 }
 @keyframes vz-flash {
   0% {
-    background: color-mix(in srgb, var(--medium) 55%, var(--bg));
-    border-color: var(--medium);
+    background: color-mix(in srgb, var(--acc) 45%, var(--bg));
+    border-color: var(--acc);
   }
 }
 @keyframes vz-box {
   0% {
-    box-shadow: 0 0 0 2px var(--medium);
+    box-shadow: 0 0 0 2px var(--acc);
   }
 }
 @keyframes vz-in {
@@ -885,10 +987,10 @@ svg .link {
   }
 }
 .vz-ptr.probe {
-  color: var(--medium);
+  color: var(--acc);
 }
 .vz-ptr.probe i {
-  border-bottom-color: var(--medium);
+  border-bottom-color: var(--acc);
 }
 .vz-chip.hot {
   border-color: var(--acc);
@@ -965,7 +1067,7 @@ svg .link {
   bottom: 20px;
   height: calc(var(--h, 0.1) * 76px);
   border-radius: 5px 5px 2px 2px;
-  background: color-mix(in srgb, var(--acc) 70%, var(--card));
+  background: color-mix(in srgb, var(--text) 22%, var(--card));
   transition:
     height var(--vz-dur) cubic-bezier(0.3, 0.7, 0.3, 1),
     background var(--vz-dur);
@@ -973,15 +1075,12 @@ svg .link {
 .vz-arr.bars .vz-cell.neg .vz-bar {
   background: color-mix(in srgb, var(--hard) 65%, var(--card));
 }
-.vz-arr.bars .vz-cell.out .vz-bar {
-  background: var(--line);
-}
 .vz-arr.bars .vz-cell.chg .vz-bar {
   animation: vz-bar calc(var(--vz-dur) * 2.4) ease-out; /* (a flash: .chg stays on the cell after it) */
 }
 @keyframes vz-bar {
   0% {
-    background: var(--medium);
+    background: var(--acc);
   }
 }
 .vz-arr.bars .vz-cell.chg {
@@ -989,24 +1088,6 @@ svg .link {
 }
 .vz-arr.bars .vz-v {
   font-size: 11px;
-}
-.vz-toggle {
-  padding: 1px 8px;
-  height: auto;
-  border-radius: 6px;
-  font:
-    10.5px ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
-  color: var(--dim);
-  opacity: 0;
-  transition: opacity 150ms;
-}
-.vz-struct:hover .vz-toggle,
-.vz-struct:focus-within .vz-toggle,
-.vz-arr.bars .vz-toggle {
-  opacity: 1;
 }
 .vz-ptr.meta {
   color: var(--dim);
@@ -1177,6 +1258,7 @@ svg .link {
 }
 .vz-bit .vz-i {
   top: -13px;
+  bottom: auto;
 }
 
 /* ---------------------------------------------------------------- the panel (new) */
@@ -1199,6 +1281,17 @@ svg .link {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+/* the pickers draw their own arrow, inset from the edge (the native one sits against it) */
+select.vz-pick,
+select.vz-lang {
+  appearance: none;
+  padding-right: 30px;
+  /* (a grey between the two themes' --dim: an image can't use the page's colours) */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a92a2' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: calc(100% - 11px) 50%;
+  background-size: 10px 6px;
+  background-repeat: no-repeat;
 }
 .vz-left,
 .vz-right {
@@ -1235,36 +1328,6 @@ svg .link {
   font-size: 12px;
   color: var(--dim);
 }
-/* what the marks on the code mean: the line that just ran (green), the one that runs next (accent), how many times each ran */
-.vz-codekey {
-  margin-left: auto;
-  display: flex;
-  gap: 10px;
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--dim);
-}
-.vz-codekey i {
-  font-style: normal;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.vz-codekey i.ran::before,
-.vz-codekey i.cur::before {
-  content: "";
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  border-left: 3px solid color-mix(in srgb, var(--easy) 70%, transparent);
-  background: color-mix(in srgb, var(--easy) 18%, transparent);
-}
-.vz-codekey i.cur::before {
-  border-left-color: var(--acc);
-  background: color-mix(in srgb, var(--acc) 26%, transparent);
-}
 .vz-edited {
   margin-left: auto;
   font-size: 11px;
@@ -1295,50 +1358,73 @@ svg .link {
   tab-size: 4;
   white-space: pre;
 }
-.vz-ln,
-.vz-hits {
+.vz-ln {
   cursor: pointer;
 }
-.vz-line:hover:not(.cur):not(.ran) {
+.vz-line:hover:not(.cur):not(.bad) {
   background: color-mix(in srgb, var(--text) 5%, transparent);
-}
-.vz-hits {
-  width: 24px;
-  flex: none;
-  margin-left: -6px;
-  text-align: right;
-  font-size: 9.5px;
-  color: var(--dim);
-  user-select: none;
 }
 .vz-caption {
   position: sticky;
   top: -12px;
   z-index: 2;
-  margin: -12px 0 0;
-  padding: 12px 0 4px;
+  padding: 12px 0 6px;
+  margin-top: -8px;
   background: var(--bg);
 }
 .vz-tabs {
   display: flex;
-  gap: 2px;
+  gap: 16px;
   align-self: flex-start;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--card);
 }
 .vz-tab {
+  padding: 2px 0;
   border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   background: none;
-  padding: 4px 12px;
-  border-radius: 7px;
+  font-size: 12px;
   color: var(--dim);
 }
+.vz-tab:hover {
+  color: var(--text);
+}
 .vz-tab[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--acc) 18%, var(--card));
   color: var(--text);
   font-weight: 600;
+  border-bottom-color: var(--acc);
+}
+/* the current call's variables: a quiet line at the foot of the column, kept in view */
+.vz-varbar {
+  position: sticky;
+  bottom: -18px;
+  z-index: 2;
+  margin: auto 0 -18px;
+  padding: 10px 0 18px;
+  background: var(--bg);
+}
+.vz-varbar[hidden],
+.vz-varbar:not(:has(.vz-var)) {
+  display: none;
+}
+.vz-varbar .vz-scalars {
+  gap: 4px 14px;
+}
+.vz-varbar .vz-var {
+  padding: 2px 5px;
+  border: 0;
+  background: none;
+  font-size: 13px;
+}
+.vz-varbar .vz-var b {
+  color: var(--dim);
+  font-weight: 500;
+}
+.vz-varbar .vz-var.cmp {
+  box-shadow: inset 0 0 0 1.5px var(--acc);
+}
+.vz-varbar .vz-var.wr {
+  background: color-mix(in srgb, var(--acc) 18%, var(--bg));
 }
 .vz-pane {
   position: relative;
@@ -1385,7 +1471,19 @@ svg .link {
 .vz-cr {
   font-size: 10.5px;
   font-weight: 600;
-  color: var(--easy);
+  color: var(--acc);
+}
+/* a call waiting on the one it made: its line, with what's come back so far (1 + ?) */
+.vz-cnode.wait .vz-cr {
+  font-weight: 500;
+  color: var(--dim);
+}
+/* hovering a call's piece of the timeline: its calls */
+.vz-cnode.lit {
+  border-color: var(--acc);
+}
+.vz-ctree .vz-link.lit {
+  stroke: var(--acc);
 }
 .vz-cr:empty {
   display: none;
@@ -1415,10 +1513,10 @@ svg .link {
 /* a call with the same arguments as an earlier one (work a memo would skip), and the others like it while one is current */
 .vz-cnode.rep {
   border-style: dashed;
-  border-color: color-mix(in srgb, var(--medium) 75%, var(--line));
+  border-color: color-mix(in srgb, var(--text) 35%, var(--line));
 }
 .vz-cnode.rep.twin {
-  background: color-mix(in srgb, var(--medium) 18%, var(--bg));
+  background: color-mix(in srgb, var(--text) 10%, var(--bg));
   opacity: 1;
 }
 .vz-rep {
@@ -1428,8 +1526,8 @@ svg .link {
   padding: 0 4px;
   border-radius: 6px;
   font: 600 9.5px var(--mono);
-  color: #fff;
-  background: var(--medium);
+  color: var(--bg);
+  background: var(--dim);
 }
 .vz-csum {
   margin: 0 0 6px;
@@ -1573,24 +1671,11 @@ svg .link {
 }
 /* narrow screens: one column, the page scrolls */
 /*
- * Data pane color palette – one meaning per color:
- *
- * --medium (amber): being tested / compared only
- * --vz-read (cyan): read by the line that ran
- * --vz-write (magenta): written by the line that ran; "filled so far" (soft tint)
- * --easy (green): finished / visited / done (sorted in place, in visited set, returned)
- * --acc (indigo): variables and pointers only (variable names, index pointers, nodes a variable points at, edge in focus)
- * --vz-front (gray): membership in a container (neutral dashed ring) — queue/stack/heap, held by monotonic stack
- * recursion path: dashed indigo outline (matches NodesView's outer nodes)
+ * Data pane colours: one accent for what the line that just ran did (ringed: looked at; filled: changed) and for variables and pointers;
+ * greys for what's kept around (in a queue, visited, held by a stack); red only for an error.
  */
 :root {
-  --vz-read: #12a4c0;
-  --vz-write: #d946ef;
   --vz-front: light-dark(#6b7280, #9097a6);
-}
-.vz-cell.fill,
-.vz-gc.fill {
-  background: color-mix(in srgb, var(--vz-write) 12%, var(--bg));
 }
 /* Being in a container (held by a monotonic stack, waiting in a queue) or on the recursion's way down is a dashed ring only: what the
    line does to the cell (compared, read, written) keeps its own colour on top of it. */
@@ -1607,84 +1692,33 @@ svg .link {
   border-width: 1.5px;
   border-color: var(--acc);
 }
-.vz-cell.cmp:is(.held, .front, .path),
-.vz-gc.cmp:is(.held, .front, .path) {
-  border-color: var(--medium);
+.vz-cell:is(.cmp, .rd, .wr, .swp):is(.held, .front, .path),
+.vz-gc:is(.cmp, .rd, .wr, .swp):is(.held, .front, .path) {
+  border-color: var(--acc);
 }
 .vz-cell.seen,
 .vz-gc.seen {
-  background: color-mix(in srgb, var(--easy) 18%, var(--bg));
-}
-.vz-cell.rd,
-.vz-gc.rd {
-  border-color: var(--vz-read);
-  background: color-mix(in srgb, var(--vz-read) 24%, var(--bg));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vz-read) 30%, transparent);
-}
-.vz-cell.wr,
-.vz-gc.wr {
-  border-color: var(--vz-write);
-  background: color-mix(in srgb, var(--vz-write) 34%, var(--bg));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vz-write) 40%, transparent);
+  background: color-mix(in srgb, var(--text) 10%, var(--bg));
 }
 .vz-cell.slice,
 .vz-gc.slice {
   box-shadow: inset 0 -3px 0 var(--acc);
 }
-.vz-arr.bars .vz-cell.rd .vz-bar {
-  background: var(--vz-read);
-}
-.vz-arr.bars .vz-cell.wr .vz-bar {
-  background: var(--vz-write);
-}
-.vz-lg.rd {
-  border-color: var(--vz-read);
-  background: color-mix(in srgb, var(--vz-read) 20%, transparent);
-}
-.vz-lg.wr {
-  border-color: var(--vz-write);
-  background: color-mix(in srgb, var(--vz-write) 26%, transparent);
-}
-.vz-lg.fill {
-  border-color: color-mix(in srgb, var(--vz-write) 45%, var(--line));
-  background: color-mix(in srgb, var(--vz-write) 12%, transparent);
-}
-.vz-lg.held {
-  border: 1px dashed var(--vz-front);
-}
-.vz-lg.slice {
-  border-color: var(--acc);
-  box-shadow: inset 0 -2px 0 var(--acc);
-}
-.vz-lg.path {
-  border: 1px dashed var(--acc);
-}
-.vz-lg.seen {
-  border-color: var(--easy);
-  background: color-mix(in srgb, var(--easy) 18%, transparent);
-}
-.vz-lg.front {
-  border: 1px dashed var(--vz-front);
-}
-.vz-lg.note {
-  border-color: var(--line);
-  color: var(--dim);
-}
 /* Persistent marks for changes (new keys, changed values, newly added items) */
 .vz-kv.wr,
 .vz-sitem.wr {
-  border-color: var(--vz-write);
-  background: color-mix(in srgb, var(--vz-write) 20%, var(--bg));
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 20%, var(--bg));
 }
 .vz-chip.wr,
 .vz-var.wr {
-  border-color: var(--vz-write);
-  background: color-mix(in srgb, var(--vz-write) 18%, var(--bg));
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 18%, var(--bg));
 }
 .vz-node.wr {
-  border-color: var(--vz-write);
-  background: color-mix(in srgb, var(--vz-write) 22%, var(--bg));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vz-write) 30%, transparent);
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 22%, var(--bg));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--acc) 30%, transparent);
 }
 /* a DP table over two strings: each row / column header has its letter under its index */
 .vz-grid.axes .vz-gh {
@@ -1715,10 +1749,10 @@ svg .link {
 .vz-kv.miss .vz-val {
   font-style: italic;
 }
-/* graph nodes: visited (green), waiting in a queue / stack / heap (amber ring), a number kept per node (under it), the edge looked at */
+/* graph nodes: visited (grey), waiting in a queue / stack / heap (grey ring), a number kept per node (under it), the edge looked at */
 .vz-node.seen {
-  background: color-mix(in srgb, var(--easy) 22%, var(--bg));
-  border-color: color-mix(in srgb, var(--easy) 70%, var(--line));
+  background: color-mix(in srgb, var(--text) 12%, var(--bg));
+  border-color: color-mix(in srgb, var(--text) 35%, var(--line));
 }
 .vz-node.front {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--vz-front) 70%, transparent);
@@ -1795,13 +1829,10 @@ svg .link {
   .vz-controls {
     flex-wrap: wrap;
   }
-  /* the buttons on one row, the slider and the speed under them */
-  .vz-slider {
+  /* the buttons on one row, the timeline under them */
+  .vz-time {
     order: 1;
-    flex-basis: 60%;
-  }
-  .vz-controls > .vz-btn:last-child {
-    order: 2;
+    flex-basis: 100%;
   }
   .vz-count {
     margin-left: auto;
@@ -1809,6 +1840,9 @@ svg .link {
   .vz-right.split > .vz-stage {
     flex: none;
     overflow: visible;
+  }
+  .vz-right:not(.split) > .vz-stage {
+    padding-top: 12px;
   }
 }
 /* a frame with only numbers (fib(n)) has no pictures: no empty row under its chips */

@@ -21,27 +21,33 @@ JavaScript runs in [Sval](https://github.com/Siubaak/sval), an interpreter); not
   pointers (and a `lo..hi` window), bars for lists sorted in place, grids (DP tables, boards), dicts, sets, linked lists, binary trees,
   graphs from adjacency lists, heaps as trees, stacks, queues, intervals on a number line, the bits of a number. The current call and its
   two callers are open; callers are indented and connected to show the call chain, with a line badge showing where each is paused (hover
-  it to highlight that line in the code). Click a frame's header to open or close it. What a test compares is marked (amber), the two
-  items just swapped too (magenta), and, in sorting code, the items already in their sorted place (green).
-- **How the structures relate**: the items and cells the line that ran read (cyan) and wrote (magenta), and in a DP table or array the
-  cells filled so far (a soft magenta tint), so `dp[a] = min(dp[a], dp[a - c] + 1)` shows where the value came from (a table over two strings has their letters
+  it to highlight that line in the code). Click a frame's header to open or close it. One colour marks what the line that just ran did:
+  what it looked at (compared, read) is ringed, what it changed (wrote, swapped) is filled. In sorting code a bracket marks the items
+  already in their sorted place. Hover a marked cell for what it means.
+- **When the code recurses**, the Data view shows the tree of its calls above the current call's data: the run's map, growing as it
+  plays. The calls on the stack form the path to the current one, a caller waiting on a call shows its line with what's come back so
+  far (`1 + ?`), and finished calls show what they returned. A call that redoes an earlier call (same arguments, and it recurses again)
+  is dashed, with how many calls a memo / cache would save. Click a call to jump to it.
+- **How the structures relate**: the items and cells the line that ran read and wrote (a copied value flies from one to the other), and in
+  a DP table the cells not filled yet (dashed), so `dp[a] = min(dp[a], dp[a - c] + 1)` shows where the value came from (a table over two strings has their letters
   on its rows and columns). A sliding window's `left` is drawn with `right` even when the code never indexes with it. A stack of indexes
   marks the items it holds (monotonic stack). In divide and conquer, when a call receives a slice of its caller's list, the caller's cells
   passed to the callee are marked. A graph is drawn in layers (topological, or by distance from the source when it's weighted)
   with its edge weights; its nodes show what the other variables say about them (in `seen`, waiting in the queue / heap, `dist` /
   `indegree` per node), and the neighbour the loop is on is named, with the edge to it. A grid shows a recursion's way down (the cells
   its callers are at), a visited set of `(r, c)` and a queue of them. A lookup that misses (`6 in seen` → no) is shown as a dashed row.
-- **Caption**: what each step changed ("`seen[2] = 0 (new key)`", "`swap a[1] ↔ a[2]`"), what a test came out as with its values put in
-  ("`nums[mid] < target` → `7 < 11` → True, so the if block runs"), the loop pass, and what the next line will check and look up
-  ("next: checks `lo <= hi`, that is `4 <= 7`", "is `target - x = 6` in seen? no").
-- **Call tree**: every call the run made, growing as it plays, with the data under it. The calls on the stack form the path to the current
-  one, and finished calls show what they returned. Good for recursion, backtracking and divide and conquer. A call that redoes an earlier
-  call (same arguments, and it recurses again) is dashed, with how many calls a memo / cache would save. Click a call to jump to it.
+- **The story**: above the pictures, one sentence for the line that just ran ("`seen[2]` is `0`", "`7 < 11` is true, so the if block
+  runs", "`fib` returns `2`"), under where the run is (the loop's pass, or the calls down to the current one). The line that ran is
+  highlighted in the code. An error says what went wrong and why: an index out of range shows the slot it asked for (`?`) and tags the
+  line that set the index up ("← j became 5 here").
+- **Timeline**: the run as a bar cut into chapters (the outer loop's passes, a recursion's calls, a red piece for an error); click or
+  drag to go there.
 - **Code tree**: the code as a tree of statements (from the language's own parser), with the statements around the current line marked and how
   many times each one has run. Click a statement, or a line of the code, to jump to the next time it runs.
 
 Keys: **←** / **→** step, **Home** / **End**, **space** plays. **Shift+→** steps over a line's calls (**Shift+←** back over them),
-**Shift+↑** steps out to the current call's return, **Shift+↓** goes to the loop's next pass. The ↷ ⤴ ⟳ buttons do the same.
+**Shift+↑** steps out to the current call's return, **Shift+↓** goes to the loop's next pass. The **⋯** menu has the same moves and the
+speed.
 
 ## What it runs
 
