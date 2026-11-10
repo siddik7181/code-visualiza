@@ -8,6 +8,7 @@ import {
   adjacency,
   backOver,
   callTree,
+  caseStatus,
   clean,
   condValues,
   detectLanguage,
@@ -606,5 +607,32 @@ describe("the data view's story", () => {
       .filter((f) => f.line === 4)
       .map((f) => f.sentence.map((p) => (typeof p === "string" ? p : Object.values(p)[0])).join(""));
     assert.deepEqual(said, ["seen[3] is added, set to 0", "seen[8] is added, set to 1"]);
+  });
+});
+
+describe("each test case's status, for its tab", () => {
+  const num = (n) => ({ v: n, heap: {} });
+  test("the right answer is ✓", () => {
+    const s = caseStatus({ expected: "6" }, { result: num(6) });
+    assert.equal(s.mark, "✓");
+    assert.equal(s.cls, "ok");
+  });
+  test("a wrong answer is ✗, with what it got and wanted", () => {
+    const s = caseStatus({ expected: "6" }, { result: num(7) });
+    assert.equal(s.mark, "✗");
+    assert.equal(s.cls, "bad");
+    assert.match(s.detail, /got 7, expected 6/);
+  });
+  test("an error is ⚠, naming the input's error", () => {
+    const s = caseStatus({ expected: "6" }, { error: "IndexError: list index out of range" });
+    assert.equal(s.mark, "⚠");
+    assert.equal(s.cls, "err");
+    assert.equal(s.detail, "IndexError: list index out of range");
+  });
+  test("a cut-off run is ⋯", () => {
+    assert.equal(caseStatus({ expected: "6" }, { truncated: true }).mark, "⋯");
+  });
+  test("no expected answer leaves the tab unmarked", () => {
+    assert.equal(caseStatus({ expected: null, call: "f(3)" }, { result: num(6) }).mark, "");
   });
 });

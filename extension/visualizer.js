@@ -1954,6 +1954,22 @@ export function detectLanguage(code) {
   return js > py ? "javascript" : "python";
 }
 
+/** How one pasted test case came out, for its tab (and the summary of failures): `mark` is ✓ right, ✗ wrong answer,
+ * ⚠ an error, ⋯ cut off, or "" when there's no expected answer to check; `cls` colours the tab (ok / bad / err);
+ * `detail` is the tooltip. `rn` is the built run ({ expected, design, call }), `r` is its trace ({ error, truncated,
+ * result }). The verdict matches the one shown for the open case (see compare()).
+ * @returns {{ mark: string, cls: string, detail: string }} */
+export function caseStatus(rn, r) {
+  if (r.error) return { mark: "⚠", cls: "err", detail: r.error };
+  if (r.truncated) return { mark: "⋯", cls: "", detail: "Stopped after 1,500 steps." };
+  if (!rn.expected || rn.design) return { mark: "", cls: "", detail: rn.call };
+  const got = r.result ? toJSON(r.result.v, r.result.heap) : undefined;
+  const how = got === undefined ? null : compare(got, rn.expected);
+  if (how === "same") return { mark: "✓", cls: "ok", detail: `expected ${rn.expected}` };
+  if (how === "order") return { mark: "✓", cls: "ok", detail: `same items, another order · expected ${rn.expected}` };
+  return { mark: "✗", cls: "bad", detail: `got ${JSON.stringify(got)}, expected ${rn.expected}` };
+}
+
 /** The whole app, in `host`; `picker` is the examples <select>. Returns { take(code, input, lang) }: run code from elsewhere (null: the
  * first example; the language is detected when not given), and { now() }: the code, input and language as they are.
  * @param {HTMLElement} host @param {HTMLSelectElement} picker @param {{ group: string, title: string, code: string, input: string }[]} examples */
@@ -3259,29 +3275,48 @@ export function mountApp(host, picker, examples) {
       mark && h(`span.vz-verdict.${how}`, { textContent: ` ${mark}` }),
     ];
   }
-  // the test cases in the input, as tabs (Case 1, Case 2 ...) to pick the one that runs
-  function showCases(list) {
+  // the test cases in the input, as tabs (Case 1, Case 2 ...) to pick the one that runs. Each tab's mark says how that
+  // case came out (✓ right, ✗ wrong answer, ⚠ error, ⋯ cut off), with the reason in its tooltip; click to open it.
+  function showCases(list, statuses = null) {
     caseBar.replaceChildren(
-      ...list.map((c, k) =>
-        h("button.vz-case", {
-          textContent: c.label,
-          title: c.call,
+      ...list.map((c, k) => {
+        const st = statuses?.[k];
+        return h(`button.vz-case${st?.cls ? `.${st.cls}` : ""}`, {
+          textContent: `${c.label}${st?.mark ? ` ${st.mark}` : ""}`,
+          title: st?.detail ? `${c.call}\n${st.detail}` : c.call,
           ariaPressed: String(k === caseAt),
           onclick: () => {
             caseAt = k;
             run();
           },
-        }),
-      ),
+        });
+      }),
     );
     caseBar.hidden = list.length < 2;
   }
+  // How a case's run came out, for its tab and the summary: shown by caseStatus (exported, module scope).
 
   let runs = 0;
   let caseAt = 0; // the test case that runs, of those in the input
   let picked = null; // the test case the shown run is of ({ label, call, expected, design, fn }), or null
   let casesFn = null; // the function (or design class) the input's test cases last ran on
   let casesChecked = true; // false after other code is pasted: the test cases stay if they're for the same function
+  // traces by code + input, so running every case (then switching between them) traces each only once
+  const traceCache = new Map();
+  let cacheBase = null;
+  function tracedFor(lang, code, driver) {
+    if (`${lang}\n${code}` !== cacheBase) {
+      traceCache.clear();
+      cacheBase = `${lang}\n${code}`;
+    }
+    const key = driver;
+    if (!traceCache.has(key)) {
+      const p = ask({ mode: "trace", lang, code, driver, text: "" });
+      p.catch(() => traceCache.delete(key)); // a timeout / crash isn't cached: it's worth retrying
+      traceCache.set(key, p);
+    }
+    return traceCache.get(key);
+  }
   async function run() {
     stop();
     const my = ++runs;
@@ -3319,10 +3354,26 @@ export function mountApp(host, picker, examples) {
         }
       }
       casesChecked = true;
-      showCases(built ? built.runs : []);
       const given = chosen ? chosen.driver : dropped ? "" : driver;
-      const r = await ask({ mode: "trace", lang, code: src, driver: given, text: "" });
-      if (my !== runs) return; // a newer run started meanwhile
+      // With several pasted cases, run every one (not just the open tab) so each tab shows whether that input
+      // passed (✓), gave a wrong answer (✗), or errored (⚠, with the message) — that's which input caused what.
+      // Ceiling: cases run one at a time (the worker is shared), so very many cases take the sum of their runs;
+      // results are cached (tracedFor), so switching tabs is free.
+      let r,
+        statuses = null;
+      if (built) {
+        const results = [];
+        for (const rn of built.runs) {
+          results.push(await tracedFor(lang, src, rn.driver));
+          if (my !== runs) return;
+        }
+        statuses = built.runs.map((rn, k) => caseStatus(rn, results[k]));
+        r = results[caseAt];
+      } else {
+        r = await tracedFor(lang, src, given);
+        if (my !== runs) return; // a newer run started meanwhile
+      }
+      showCases(built ? built.runs : [], statuses);
       result = r;
       picked = chosen;
       setLanguage(r.lang || "python");
@@ -3348,6 +3399,14 @@ export function mountApp(host, picker, examples) {
           chosen.design ? `the test case's ${n} calls` : h("code", { textContent: clip(chosen.call, 140) }),
           ...built.notes.map((x) => ` ${x}`),
         );
+      }
+      // which inputs errored or gave a wrong answer, named, so a glance says what to open
+      if (statuses) {
+        const bad = statuses
+          .map((s, k) => ({ s, label: built.runs[k].label || `Case ${k + 1}` }))
+          .filter((x) => x.s.cls === "err" || x.s.cls === "bad");
+        if (bad.length)
+          note.append(h("span.vz-casesum", { textContent: ` — ${bad.map((x) => `${x.label} ${x.s.mark} ${x.s.detail}`).join("; ")}` }));
       }
       if (dropped) note.textContent = `${dropped} ${note.textContent}`;
       code = src.split("\n");

@@ -62,8 +62,10 @@ Python and JavaScript, the same way:
   Testcase tab's values (one per line, or each under its name), a problem's examples (`Input: nums = [2,7,11,15], target = 9`,
   `Output: [0,1]`), a design problem's two lines (`["MinStack","push",...]` / `[[],[-2],...]`), or a Test Result. They become calls of
   the code's function (`null` → `None` in Python), with a list built into the `ListNode`, `TreeNode` or graph `Node` a parameter is (from
-  its type hint, JSDoc or docstring, or how the code uses it). Several cases get a tab each, and the result is checked against the
-  expected answer (✓, ✓ in another order, ✗). Code pasted for another problem clears the old test cases.
+  its type hint, JSDoc or docstring, or how the code uses it). Several cases get a tab each; every case is run, and its tab is
+  marked with how it came out — the answer checked against the expected one (✓, ✓ in another order, ✗), an error (⚠, with the
+  message), or cut off (⋯) — so you see at a glance which input causes what, with a line naming the ones that failed and their
+  reasons. Click a tab to replay that case. Code pasted for another problem clears the old test cases.
 - Selected code is cleaned up first: common indentation removed (a method copied out of its class), non-breaking spaces made spaces.
 - Built in, no import or definition needed: `linked([1, 2, 3])` (a linked list), `tree([3, 9, 20, None, None, 15, 7])` (a binary tree,
   level order; `null` in JavaScript), `graph({1: [2], 2: [1]})`, `ListNode`, `TreeNode`; in Python also `heapq`, `deque`, `defaultdict`,
