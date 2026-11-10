@@ -107,19 +107,31 @@ Python and JavaScript, the same way:
 
 `npm install` once, then:
 
-| Command             | What it does                                                                                                                                   |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm run format`    | Prettier: rewrites files to the project style (`format:check` only checks)                                                                     |
-| `npm run lint`      | ESLint: unused variables, `==`, `let` that should be `const`, and other likely bugs                                                            |
-| `npm run typecheck` | TypeScript checks the JavaScript (no build step: Chrome loads `extension/` as is; JSDoc adds types where needed)                               |
-| `npm test`          | Unit tests (`test/*.test.mjs`, Node's test runner): both tracers, the call tree, the clean-up, language detection, the manifest, every example |
-| `npm run test:e2e`  | End to end (`test/*.e2e.mjs`): loads the unpacked extension in Chrome and drives the panel (needs Chrome; `CHROME_PATH` to point at it)        |
-| `npm run check`     | format:check, lint, typecheck and the unit tests, in that order                                                                                |
+| Command               | What it does                                                                                                                                   |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run format`      | Prettier: rewrites files to the project style (`format:check` only checks)                                                                     |
+| `npm run lint`        | ESLint: unused variables, `==`, `let` that should be `const`, and other likely bugs                                                            |
+| `npm run typecheck`   | TypeScript checks the JavaScript (no build step: Chrome loads `extension/` as is; JSDoc adds types where needed)                               |
+| `npm test`            | Unit tests (`test/*.test.mjs`, Node's test runner): both tracers, the call tree, the clean-up, language detection, the manifest, every example |
+| `npm run test:e2e`    | End to end (`test/*.e2e.mjs`): loads the unpacked extension in Chrome and drives the panel (needs Chrome; `CHROME_PATH` to point at it)        |
+| `npm run check`       | format:check, lint, typecheck and the unit tests, in that order                                                                                |
+| `npm run build`       | Zips `extension/` into `visualiza.zip`, the Chrome Web Store package (leaves out `.DS_Store` and the vendored READMEs)                         |
+| `npm run build:store` | Zips `store/` into `visualiza-store-assets.zip`, the listing images                                                                            |
 
 The bundled libraries (`extension/vendor/`) are left out of formatting, linting and type checks.
 
-## Package for the Chrome Web Store
+[GitHub Actions](.github/workflows) runs `npm run check` on every push and pull request (`ci.yml`).
 
-```sh
-cd extension && zip -r ../visualiza.zip . -x '*.DS_Store' 'vendor/*/README.md' 'vendor/*/*.d.mts'
-```
+## Release and publish to the Chrome Web Store
+
+The release is built for you: bump `version` in `extension/manifest.json`, then either push a matching tag
+(`git tag v0.1.0 && git push origin v0.1.0`) or run the **Release** workflow from the Actions tab. It runs
+the checks, builds the package, and attaches two files to a GitHub release:
+
+- `visualiza.zip` — the extension. Upload it as the item in the
+  [Chrome Web Store dashboard](https://chrome.google.com/webstore/devconsole).
+- `visualiza-store-assets.zip` — the listing images (screenshots, promo tiles). Drop your images into
+  `store/` first (see [`store/README.md`](store/README.md) for the sizes the store wants); unzip this and
+  upload them in the listing form.
+
+To build the same package locally: `npm run build`.

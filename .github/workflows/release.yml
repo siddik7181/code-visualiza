@@ -1,0 +1,62 @@
+name: Release
+
+# Builds the Chrome Web Store package and attaches it (with the store listing images) to a GitHub
+# release. Trigger it by pushing a tag like `v0.1.0`, or run it from the Actions tab (it tags the
+# current commit with the version from extension/manifest.json). Download visualiza.zip from the
+# release and upload it to the Chrome Web Store; visualiza-store-assets.zip has the listing images.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # gate the release on the same checks CI runs
+      - run: npm run check
+
+      - name: Work out the version and tag
+        id: ver
+        run: |
+          VERSION="$(node -p "require('./extension/manifest.json').version")"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            if [ "${TAG}" != "v${VERSION}" ]; then
+              echo "::error::Tag ${TAG} doesn't match manifest version v${VERSION}. Bump extension/manifest.json first."
+              exit 1
+            fi
+          else
+            TAG="v${VERSION}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the extension package and store assets
+        run: |
+          npm run build
+          npm run build:store
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --title "Visualiza ${{ steps.ver.outputs.version }}" \
+            --notes "Chrome Web Store package for Visualiza ${{ steps.ver.outputs.version }}.
+
+          - **visualiza.zip** — upload this as the item in the [Chrome Web Store dashboard](https://chrome.google.com/webstore/devconsole).
+          - **visualiza-store-assets.zip** — the listing images (screenshots, promo tiles); unzip and upload them in the listing form. See \`store/README.md\`." \
+            --target "${GITHUB_SHA}" \
+            visualiza.zip visualiza-store-assets.zip
