@@ -170,6 +170,16 @@ button:disabled {
   color: var(--text);
   font-weight: 600;
 }
+.vz-case.ok {
+  color: var(--easy);
+}
+.vz-case.err,
+.vz-case.bad {
+  color: var(--hard);
+}
+.vz-casesum {
+  color: var(--hard);
+}
 /* LeetCode's expected answer, and whether the result is it */
 .vz-result .vz-verdict {
   font-weight: 700;
