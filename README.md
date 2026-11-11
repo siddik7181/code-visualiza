@@ -40,6 +40,10 @@ JavaScript runs in [Sval](https://github.com/Siubaak/sval), an interpreter); not
   runs", "`fib` returns `2`"), under where the run is (the loop's pass, or the calls down to the current one). The line that ran is
   highlighted in the code. An error says what went wrong and why: an index out of range shows the slot it asked for (`?`) and tags the
   line that set the index up ("← j became 5 here").
+- **A steady view**: the current call's variables sit in one row right under the sentence, each in the same place for the whole call (one
+  out of scope between a loop's passes stays, greyed). Nothing jumps from one step to the next: the sentence, the variables and each
+  picture keep the most room they've needed. The pictures scroll in their own box (and a picture too big for it in its own), never the
+  page, and each scrolls by itself to keep what the line touched in view.
 - **Timeline**: the run as a bar cut into chapters (the outer loop's passes, a recursion's calls, a red piece for an error); click or
   drag to go there.
 - **Code tree**: the code as a tree of statements (from the language's own parser), with the statements around the current line marked and how
