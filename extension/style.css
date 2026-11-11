@@ -291,13 +291,20 @@ button:disabled {
   color: var(--hard);
   opacity: 0.85;
 }
+/* the pictures: the rest of the column, scrolled on their own (the caption and the variables above them stay put); a size container, so
+   a picture's own box can be told how tall the room is (.vz-scroll) */
 .vz-stage {
+  flex: 1 1 0;
+  min-height: 160px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  container-type: size;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 .vz-right:not(.split) > .vz-stage {
-  padding-top: clamp(8px, 5vh, 56px);
+  padding-top: 6px;
 }
 .vz-frame {
   border: 1px solid var(--line);
@@ -496,9 +503,16 @@ svg .link {
   font-size: 10.5px;
   color: var(--dim);
 }
+/* a picture too big for the room scrolls in its own box, which keeps what the line touched in view (keepInView) */
 .vz-scroll {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: max(120px, 100cqh - 56px);
+  overscroll-behavior: contain;
   padding-bottom: 2px;
+}
+/* a variable out of scope at this line (a loop's own, between passes) keeps its place in the row, greyed */
+.vz-var.gone {
+  opacity: 0.4;
 }
 /* arrays */
 .vz-arr {
@@ -1404,14 +1418,11 @@ select.vz-lang {
   font-weight: 600;
   border-bottom-color: var(--acc);
 }
-/* the current call's variables: a quiet line at the foot of the column, kept in view */
+/* the current call's variables: a row under the caption, always in the same place */
 .vz-varbar {
-  position: sticky;
-  bottom: -18px;
-  z-index: 2;
-  margin: auto 0 -18px;
-  padding: 10px 0 18px;
-  background: var(--bg);
+  margin-top: -4px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--line);
 }
 .vz-varbar[hidden],
 .vz-varbar:not(:has(.vz-var)) {
@@ -1806,35 +1817,35 @@ select.vz-lang {
   .vz-tagline {
     display: none;
   }
+  /* the code over the pictures; the pictures take the rest of the height and scroll on their own (the page scrolls only when there's
+     no room even for a small picture box) */
   .vz-body {
-    display: block;
+    display: flex;
+    flex-direction: column;
     overflow: auto;
   }
-  .vz-left,
-  .vz-right {
-    overflow: visible;
-  }
   .vz-left {
+    flex: 0 1 auto;
+    max-height: 44%; /* (long code scrolls in its box: the rest is the pictures') */
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
+  .vz-right {
+    flex: 1 1 0;
+    min-height: 360px;
+  }
   .vz-left > .vz-codewrap {
-    flex: none;
+    flex: 0 1 auto;
     height: auto; /* short code leaves the room to the pictures (a side panel is narrow) */
-    max-height: 40vh;
-    min-height: 0;
+    min-height: 80px;
   }
   .vz-caption {
     position: static;
     margin: 0;
     padding: 0;
   }
-  .vz-pane {
-    flex: none;
-    height: 60vh;
-  }
   .vz-right.split > .vz-pane {
-    height: 40vh;
+    height: 30vh;
   }
   .vz-controls {
     flex-wrap: wrap;
@@ -1846,13 +1857,6 @@ select.vz-lang {
   }
   .vz-count {
     margin-left: auto;
-  }
-  .vz-right.split > .vz-stage {
-    flex: none;
-    overflow: visible;
-  }
-  .vz-right:not(.split) > .vz-stage {
-    padding-top: 12px;
   }
 }
 /* a frame with only numbers (fib(n)) has no pictures: no empty row under its chips */
