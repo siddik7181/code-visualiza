@@ -615,6 +615,8 @@ class ArrayView {
 }
 // The marks on a list's or a grid's cells. What the line that ran touched (cmp, swp, rd, wr) is the one accent colour; the rest are quiet
 // (dashed, shaded, faded), and a cell's tooltip says what a quiet mark means.
+/** the widest value (in ch, capped) each variable chip has shown this run: its room only grows */
+const chipRoom = new WeakMap();
 const MARKS = ["cmp", "swp", "rd", "wr", "unfilled", "held", "path", "seen", "front", "slice"];
 const QUIET = {
   unfilled: "not written yet",
@@ -2026,7 +2028,7 @@ export function mountApp(host, picker, examples) {
   const codeWrap = h("div.vz-codewrap", {}, codeBox, editor);
   const caption = h("div.vz-caption");
   const stage = h("div.vz-stage");
-  // the current call's variables, a quiet line at the foot of the column (a caller's stay on its card)
+  // the current call's variables, in a row under the caption: where the line that ran is said, what it left is (a caller's stay on its card)
   const varBar = h("div.vz-varbar", { ariaLabel: "Variables" });
   const outBox = h("div.vz-out");
   const status = h("p.vz-status");
@@ -2132,11 +2134,11 @@ export function mountApp(host, picker, examples) {
     { ariaLabel: "What the program does" },
     h("div.vz-tabs", { role: "group", ariaLabel: "Picture" }, tabBtns),
     caption,
+    varBar,
     treePane,
     panes.outline,
     stage,
     outBox,
-    varBar,
   );
   // hovering (or focusing) a variable lights everywhere it's drawn in its call: its chip, pointers, the cells they point at
   const linkScope = (t) => {
@@ -2154,6 +2156,14 @@ export function mountApp(host, picker, examples) {
         .forEach((el) => el.dataset.var.split(" ").some((v) => vars.includes(v)) && el.classList.add("link"));
   };
   const linkOff = (e) => e.target.closest?.("[data-var]") && right.querySelectorAll(".link").forEach((el) => el.classList.remove("link"));
+  // the room boxes have kept (holdRoom) was for another width
+  let room = new WeakMap(),
+    rightWidth = 0;
+  new ResizeObserver(() => {
+    if (right.clientWidth === rightWidth) return;
+    rightWidth = right.clientWidth;
+    freeRoom();
+  }).observe(right);
   right.addEventListener("mouseover", linkOn);
   right.addEventListener("focusin", linkOn);
   right.addEventListener("mouseout", linkOff);
@@ -2241,6 +2251,7 @@ export function mountApp(host, picker, examples) {
     fk = 0;
     frameEls.clear();
     for (const box of [stage, varBar, caption, outBox, calls.el, codeTree.el, caseBar]) box.replaceChildren();
+    freeRoom();
     caption.append(h("span.vz-hint", { textContent: "The code changed: press Run (Ctrl+Enter) to trace it." }));
     callSum.textContent = note.textContent = "";
     caseBar.hidden = true;
@@ -2397,6 +2408,74 @@ export function mountApp(host, picker, examples) {
       ...(last && result.truncated
         ? [h("div.vz-error", { textContent: "Stopped after 1,500 steps. Try a smaller input to see the whole run." })]
         : []),
+    );
+    holdRoom();
+    if (tab === "data") keepInView();
+  }
+  // Boxes only grow while stepping, so nothing moves under the reader's eye from one step to the next: the caption, the variables and
+  // each picture keep the most room they've needed (until the next run, or a change of the column's width).
+  function holdRoom() {
+    for (const el of /** @type {HTMLElement[]} */ ([caption, varBar, ...stage.querySelectorAll(".vz-struct")])) {
+      const need = el.offsetHeight;
+      if (need <= (room.get(el) || 0)) continue;
+      room.set(el, need);
+      el.style.minHeight = `${need}px`;
+    }
+  }
+  function freeRoom() {
+    room = new WeakMap();
+    for (const el of /** @type {HTMLElement[]} */ ([caption, varBar, ...stage.querySelectorAll(".vz-struct")])) el.style.minHeight = "";
+  }
+  // What the line touched stays in view without scrolling by hand: each of the current call's pictures scrolls its own box to the cells
+  // the line touched (or else where its variables point), and the pictures' box to the picture the line touched.
+  function keepInView() {
+    const top = stage.querySelector(".vz-frame.top");
+    if (!top) return;
+    let first = null;
+    for (const w of top.querySelectorAll(".vz-struct")) {
+      const box = w.querySelector(".vz-scroll");
+      if (!box) continue;
+      const marked = [...box.querySelectorAll(":is(.cmp, .swp, .rd, .wr):not(.vz-ptr)")];
+      const hits = marked.length ? marked : [...box.querySelectorAll("[data-var]")];
+      if (hits.length) bring(box, hits);
+      if (!first && (marked.length || w.classList.contains("active"))) first = { w, hit: hits[0] };
+    }
+    // (only when what it touched is out of view: two pictures in turn don't rock the box; then the picture, or the cell when the picture
+    // is taller than the box)
+    if (first && !inView(first.hit || first.w, !!first.hit))
+      reveal(first.hit && first.w.offsetHeight > stage.clientHeight ? first.hit : first.w);
+  }
+  /** Whether `e` shows in the pictures' box: all of it (`whole`), or some. */
+  function inView(e, whole) {
+    const r = e.getBoundingClientRect(),
+      b = stage.getBoundingClientRect();
+    return whole ? r.top >= b.top - 1 && r.bottom <= b.bottom + 1 : r.bottom > b.top + 8 && r.top < b.bottom - 8;
+  }
+  // Scrolls `box` the least that shows `els` (or the first of them, when they don't all fit), across and down.
+  function bring(box, els) {
+    const b = box.getBoundingClientRect();
+    const rs = els.map((e) => e.getBoundingClientRect());
+    const pad = 6;
+    /** how far to scroll along one axis: [lo, hi] are the items' edges, [pos, pos + size] the box's */
+    const by = (lo, hi, pos, size) => {
+      let a = Math.min(...lo),
+        z = Math.max(...hi);
+      if (z - a > size - 2 * pad) [a, z] = [lo[0], hi[0]];
+      if (a < pos + pad) return a - (pos + pad);
+      if (z > pos + size - pad) return Math.min(z - (pos + size - pad), a - (pos + pad));
+      return 0;
+    };
+    box.scrollLeft += by(
+      rs.map((r) => r.left),
+      rs.map((r) => r.right),
+      b.left + box.clientLeft,
+      box.clientWidth,
+    );
+    box.scrollTop += by(
+      rs.map((r) => r.top),
+      rs.map((r) => r.bottom),
+      b.top + box.clientTop,
+      box.clientHeight,
     );
   }
 
@@ -2654,7 +2733,7 @@ export function mountApp(host, picker, examples) {
       fe.el.classList.toggle("collapsed", !fe.open);
       // a single call of code that doesn't recurse: no header (the caption says where the run is)
       fe.el.classList.toggle("solo", isTop && !recursive && drawn.length === 1);
-      // the current call's variables go to the line at the foot of the column; a caller's are on its card
+      // the current call's variables go to the row under the caption; a caller's are on its card
       if (isTop) {
         if (fe.scalars.parentNode !== varBar) varBar.replaceChildren(fe.scalars);
       } else if (fe.scalars.parentNode !== fe.el) fe.el.insertBefore(fe.scalars, fe.structs);
@@ -2898,10 +2977,10 @@ export function mountApp(host, picker, examples) {
         fe.views.set(name, item);
         if (animate) wrap.classList.add("enter");
       }
-      item.ref = isRef(v) ? v.r : null;
-      item.alias = new Set();
       if (fe.structs.children[order] !== item.wrap) fe.structs.insertBefore(item.wrap, fe.structs.children[order] || null);
       order++;
+      item.ref = isRef(v) ? v.r : null;
+      item.alias = new Set();
       const o = objOf(v, heap);
       const changedRef = prevFrame && (prevFrame.loc.find(([k]) => k === name) || [])[1];
       const reassigned = animate && changedRef !== undefined && isRef(changedRef) && isRef(v) && changedRef.r !== v.r;
@@ -3222,7 +3301,6 @@ export function mountApp(host, picker, examples) {
       }
     // scalar chips (numbers, strings, None, booleans), nodes as their label, and a caller's structures drawn in the current call
     const chipSeen = new Set();
-    let ci = 0;
     for (const [name, v] of vars) {
       if (seenNames.has(name)) continue;
       if (!asChip.has(name) && isRef(v) && objOf(v, heap) && !isNode(objOf(v, heap)) && kindOf(v, heap) !== "scalar") continue; // shown as an alias of a picture
@@ -3234,9 +3312,15 @@ export function mountApp(host, picker, examples) {
         if (animate) c.classList.add("enter");
         fe.chips.set(name, c);
       }
-      if (fe.scalars.children[ci] !== c) fe.scalars.insertBefore(c, fe.scalars.children[ci] || null);
-      ci++;
+      c.classList.remove("gone");
+      c.title = "";
       const text = asChip.has(name) ? clip(fmt(v, heap), 28) : fmt(v, heap);
+      // a value's room only grows: a shorter value doesn't move the variables after it
+      const width = Math.min(text.length, 24);
+      if (width > (chipRoom.get(c) || 0)) {
+        chipRoom.set(c, width);
+        /** @type {HTMLElement} */ (c.lastChild).style.minWidth = `${width}ch`;
+      }
       const changed = before.has(name) && fmt(before.get(name), prevHeap) !== text;
       c.classList.toggle("cmp", !!cmp?.vars.has(name));
       c.classList.toggle("pointer", isPointer); // add class for static cue
@@ -3249,11 +3333,18 @@ export function mountApp(host, picker, examples) {
         if (animate && changed) flash(c);
       }
     }
+    // a variable keeps its place in the row for the whole call: one out of scope here (a JavaScript loop's `const`, between passes) is
+    // greyed, not dropped; one now drawn as a picture goes
     for (const [name, c] of fe.chips)
-      if (!chipSeen.has(name)) {
+      if (valuesByName.has(name) && !chipSeen.has(name)) {
         c.remove();
         fe.chips.delete(name);
+      } else if (!valuesByName.has(name)) {
+        c.classList.add("gone");
+        c.classList.remove("wr", "cmp");
+        c.title = "not in scope at this line";
       }
+    [...fe.chips.values()].forEach((c, k) => fe.scalars.children[k] !== c && fe.scalars.insertBefore(c, fe.scalars.children[k] || null));
   }
 
   // the result; a linked list or tree as LeetCode writes it (ListNode [5,4,3,2,1]), not just its first node
@@ -3415,6 +3506,7 @@ export function mountApp(host, picker, examples) {
       frameEls.forEach((fe) => fe.el.remove());
       frameEls.clear();
       varBar.replaceChildren();
+      freeRoom();
       framePref.clear();
       lastTop = null;
       const tree = callTree(r.steps);
