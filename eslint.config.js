@@ -2,7 +2,7 @@ import js from "@eslint/js";
 import globals from "globals";
 
 export default [
-  { ignores: ["node_modules/", "extension/vendor/"] },
+  { ignores: ["node_modules/", "extension/vendor/", "_site/"] },
   js.configs.recommended,
   {
     languageOptions: { ecmaVersion: "latest", sourceType: "module" },
@@ -15,6 +15,8 @@ export default [
   },
   // the panel (and selection.js, which runs in the page): a browser, plus the extension APIs (chrome.*)
   { files: ["extension/*.js"], languageOptions: { globals: { ...globals.browser, ...globals.webextensions } } },
+  // the web build's entry (GitHub Pages): a browser, no extension APIs
+  { files: ["site/*.js"], languageOptions: { globals: globals.browser } },
   // the background service worker, and the Python worker
   { files: ["extension/background.js"], languageOptions: { globals: { ...globals.serviceworker, ...globals.webextensions } } },
   { files: ["extension/worker.js"], languageOptions: { globals: globals.worker } },

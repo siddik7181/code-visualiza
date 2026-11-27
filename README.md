@@ -5,6 +5,9 @@ Overflow, GitHub, a LeetCode solution), right-click, choose **Explain this with 
 the data change. The code really runs, inside the extension and offline (Python is CPython 3.14 via [Pyodide](https://pyodide.org);
 JavaScript runs in [Sval](https://github.com/Siubaak/sval), an interpreter); nothing is sent anywhere, and no AI is involved.
 
+**Try it in the browser, no install: <https://siddik7181.github.io/code-visualiza/>** (the same visualizer with the examples and a code box;
+the right-click menu and side panel are what the extension adds).
+
 ## Install
 
 `chrome://extensions` → turn on **Developer mode** → **Load unpacked** → pick the `extension/` folder. (Chrome 116 or later.)
@@ -101,6 +104,7 @@ Python and JavaScript, the same way:
 | `extension/vendor/sval/`      | Sval 0.6.12 (MIT), with three fixes to its `try` / `finally` and destructuring; see its README                                      |
 | `extension/examples.js`       | The examples in the panel                                                                                                           |
 | `extension/leetcode.js`       | LeetCode test cases pasted in the input: read from each way LeetCode shows them, turned into calls, results checked                 |
+| `site/`                       | The web build's page (`index.html`, `web.js`): the visualizer without the extension hand-offs, for GitHub Pages                     |
 | `test/`                       | The tests (below)                                                                                                                   |
 
 ## Development
@@ -116,11 +120,13 @@ Python and JavaScript, the same way:
 | `npm run test:e2e`    | End to end (`test/*.e2e.mjs`): loads the unpacked extension in Chrome and drives the panel (needs Chrome; `CHROME_PATH` to point at it)        |
 | `npm run check`       | format:check, lint, typecheck and the unit tests, in that order                                                                                |
 | `npm run build`       | Zips `extension/` into `visualiza.zip`, the Chrome Web Store package (leaves out `.DS_Store` and the vendored READMEs)                         |
+| `npm run build:site`  | Builds `_site/`, the web version for GitHub Pages: `extension/` minus the extension-only files, plus `site/`                                   |
 | `npm run build:store` | Zips `store/` into `visualiza-store-assets.zip`, the listing images                                                                            |
 
 The bundled libraries (`extension/vendor/`) are left out of formatting, linting and type checks.
 
-[GitHub Actions](.github/workflows) runs `npm run check` on every push and pull request (`ci.yml`).
+[GitHub Actions](.github/workflows) runs `npm run check` on every push and pull request (`ci.yml`), and `pages.yml` publishes `_site/` to GitHub Pages on every push to `main`
+(once: **Settings → Pages → Source: GitHub Actions**).
 
 ## Release and publish to the Chrome Web Store
 

@@ -4,3 +4,4 @@ __pycache__/
 .claude/settings.local.json
 visualiza.zip
 visualiza-store-assets.zip
+_site/
