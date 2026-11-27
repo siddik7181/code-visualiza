@@ -12,6 +12,7 @@
     "test:e2e": "node --test --test-reporter=spec test/*.e2e.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
     "build": "rm -f visualiza.zip && cd extension && zip -rq -X ../visualiza.zip . -x '*.DS_Store' 'vendor/*/README.md' 'vendor/*/*.d.mts'",
+    "build:site": "rm -rf _site && cp -R extension _site && cd _site && rm -f manifest.json background.js selection.js panel.html panel.js && cp ../site/* .",
     "build:store": "rm -f visualiza-store-assets.zip && zip -rq visualiza-store-assets.zip store -x '*.DS_Store'"
   },
   "engines": {
